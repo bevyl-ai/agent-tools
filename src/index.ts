@@ -2,7 +2,10 @@
 // Domain tools (a project's tracker access, PR build gates) stay in the consuming project; only what is genuinely
 // reusable lives here.
 export * from './types'
-export { isQuotaWall, maybeRotateGateway, type GatewayFs, type RotateResult } from './rotate'
+export { isQuotaWall, maybeRotateGateway, sshGatewayFs, type GatewayFs, type RotateResult } from './rotate'
+export { execAsync, remoteHome, scpInto, shq, sshExec } from './ssh'
+export { scrubSecrets, SECRET_ENV } from './scrub-env'
+export { writeCodexGatewayConfig, type CodexGatewayOptions } from './codex-config'
 export { AppServerSession, type SessionHooks } from './app-server'
 export { opsReadTool, resolveOpsRequest } from './ops-read'
 export { dbReadTool, validateReadQuery } from './db-read'

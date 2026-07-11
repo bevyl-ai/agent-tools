@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { shq, sshExec } from './ssh'
 
 // Codex gateway rotation for a shared pool of interchangeable ChatGPT accounts (e.g. exe.dev `llm`
 // integrations). Which account codex uses is just the gateway HOSTNAME inside `base_url` in
@@ -38,12 +39,26 @@ const localFs: GatewayFs = {
   write: (path, text) => writeFileSync(path, text),
 }
 
+/** A GatewayFs for a remote host's config (bunion's ssh workers): home-relative paths, and any ssh failure
+ *  reads as null / no-op — an unreachable box shouldn't add its own error on top of the failure that brought
+ *  us here. */
+export function sshGatewayFs(host: string): GatewayFs {
+  return {
+    read: (path) => {
+      const r = sshExec(host, `cat ${shq(path)}`, 30_000)
+      return r.ok ? r.out : null
+    },
+    write: (path, text) => void sshExec(host, `cat > ${shq(path)}`, 30_000, text),
+  }
+}
+
 const defaultConfigPath = (): string => join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml')
 
 /** Advance the codex gateway to the next pool entry, iff `reason` is a quota wall and the cooldown has
- *  passed. Never touches hosts outside CODEX_GATEWAY_POOL, so other providers in config.toml are safe. */
-export function maybeRotateGateway(opts: { reason: string; configPath?: string; now?: number; fs?: GatewayFs }): RotateResult {
-  const pool = (process.env.CODEX_GATEWAY_POOL ?? '').split(',').map((h) => h.trim()).filter(Boolean)
+ *  passed. Never touches hosts outside the pool, so other providers in config.toml are safe. `pool` and
+ *  `cooldownMs` override the env for consumers that read their config from a file (stupify's config.env). */
+export function maybeRotateGateway(opts: { reason: string; configPath?: string; now?: number; fs?: GatewayFs; pool?: string[]; cooldownMs?: number }): RotateResult {
+  const pool = opts.pool ?? (process.env.CODEX_GATEWAY_POOL ?? '').split(',').map((h) => h.trim()).filter(Boolean)
   if (pool.length < 2) return { rotated: false, why: pool.length === 0 ? 'CODEX_GATEWAY_POOL unset — rotation off' : 'pool has a single entry' }
   if (!isQuotaWall(opts.reason)) return { rotated: false, why: 'not a quota wall' }
 
@@ -55,7 +70,7 @@ export function maybeRotateGateway(opts: { reason: string; configPath?: string; 
   if (i === -1) return { rotated: false, why: 'no pool gateway in codex config' }
 
   const now = opts.now ?? Date.now()
-  const cooldownMs = Number(process.env.CODEX_ROTATE_COOLDOWN_MIN || 10) * 60_000
+  const cooldownMs = opts.cooldownMs ?? Number(process.env.CODEX_ROTATE_COOLDOWN_MIN || 10) * 60_000
   const stampPath = configPath + '.rotated-at'
   const stamp = fs.read(stampPath)
   if (stamp !== null) {

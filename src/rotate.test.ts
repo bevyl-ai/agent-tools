@@ -94,6 +94,18 @@ test('injected fs (remote worker) is used for both config and stamp', () => {
   expect(files['/remote/config.toml.rotated-at']).toBe('1000')
 })
 
+test('opts.pool and opts.cooldownMs override the env (config-file-driven consumers)', () => {
+  delete process.env.CODEX_GATEWAY_POOL
+  const pool = ['llm.int.exe.xyz', 'llm-3.int.exe.xyz']
+  expect(maybeRotateGateway({ reason: 'usage limit', configPath, now: 1000, pool, cooldownMs: 5_000 })).toEqual({
+    rotated: true,
+    from: 'llm.int.exe.xyz',
+    to: 'llm-3.int.exe.xyz',
+  })
+  expect(maybeRotateGateway({ reason: 'usage limit', configPath, now: 4000, pool, cooldownMs: 5_000 }).rotated).toBe(false)
+  expect(maybeRotateGateway({ reason: 'usage limit', configPath, now: 7000, pool, cooldownMs: 5_000 }).rotated).toBe(true)
+})
+
 test('config pointing outside the pool is left alone', () => {
   writeFileSync(configPath, CONFIG.replace('llm.int.exe.xyz', 'llm-2.int.exe.xyz'))
   const r = maybeRotateGateway({ reason: 'usage limit', configPath, now: 1000 })
