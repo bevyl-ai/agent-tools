@@ -14,6 +14,19 @@ Extracted from the `@bevyl/agent-kit` packages vendored in [bunion](https://gith
   Trigger.dev / Vercel / Datadog / Sentry / Slack).
 - Integration helpers: `github.ts`, `linear.ts`, `notion.ts` — capability-style API tools where the host
   holds the tokens and the agent names allowlisted endpoints.
+- Surfaces: `surface.ts` (the `SurfaceAdapter` contract — the portability boundary between a chat surface
+  and everything above it) and `slack-adapter.ts` (the Socket Mode reference implementation).
+- GitHub App identity: `github-app.ts` (App JWT → cached installation token) and `github-session-hooks.ts`
+  (a `SessionHooks` that injects the bot token into codex sessions — child env locally, a refreshed
+  token file over ssh for remote workers).
+- `ssh.ts` — hardened ssh/scp helpers for driving remote worker VMs (`sshExec`, `execAsync`, `scpInto`,
+  `remoteHome`, `shq`).
+- `exe.ts` — the exe.dev control-plane: `exe()` (the `ssh exe.dev` CLI), integration discovery, VM naming,
+  first-boot setup scripts, cron installation, repo/host validation.
+- `host.ts` — runtime primitives for an agent looping on a box: `exec` (stdin-fed subprocess), env-file
+  parsing, a pid-based single-flight lock, clone-or-reset checkout refresh.
+- `codex-config.ts` — one writer for the keyless exe-llm gateway block in `~/.codex/config.toml`.
+- `scrub-env.ts` — the default `scrubEnv`: strip secret-looking vars from what a codex child inherits.
 - `types.ts` — the event/tool/config contract all of the above share.
 
 Source-only TypeScript, no dependencies, Bun ≥ 1.3.
