@@ -22,6 +22,13 @@ const QUOTA_WALL =
 
 export const isQuotaWall = (text: string): boolean => QUOTA_WALL.test(text)
 
+// The LOOSE sibling: "this run is rate/usage-limited, stop hammering" — matches transient throttles
+// (429, too-many-requests) that must NOT rotate the gateway ring. Two regexes on purpose: isRateLimited
+// decides when a caller backs off; isQuotaWall decides when the ACCOUNT is drained enough to rotate.
+// Do not merge them — a 429 that walked the ring would thrash accounts on every burst.
+export const isRateLimited = (out: string): boolean =>
+  /payment required|credits?\s+exhausted|insufficient\s+(?:credit|quota|balance)|usage limit|rate.?limit|too many requests|\b(?:402|429)\b|quota/i.test(out)
+
 export type RotateResult = { rotated: true; from: string; to: string } | { rotated: false; why: string }
 
 /** Where the config lives. Local by default; a consumer whose codex runs on a remote host (bunion's ssh
