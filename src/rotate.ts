@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -23,32 +23,49 @@ export const isQuotaWall = (text: string): boolean => QUOTA_WALL.test(text)
 
 export type RotateResult = { rotated: true; from: string; to: string } | { rotated: false; why: string }
 
+/** Where the config lives. Local by default; a consumer whose codex runs on a remote host (bunion's ssh
+ *  workers) supplies read/write that shell out to that host. `read` returns null for a missing file. */
+export type GatewayFs = { read(path: string): string | null; write(path: string, text: string): void }
+
+const localFs: GatewayFs = {
+  read: (path) => {
+    try {
+      return readFileSync(path, 'utf8')
+    } catch {
+      return null
+    }
+  },
+  write: (path, text) => writeFileSync(path, text),
+}
+
 const defaultConfigPath = (): string => join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml')
 
 /** Advance the codex gateway to the next pool entry, iff `reason` is a quota wall and the cooldown has
  *  passed. Never touches hosts outside CODEX_GATEWAY_POOL, so other providers in config.toml are safe. */
-export function maybeRotateGateway(opts: { reason: string; configPath?: string; now?: number }): RotateResult {
+export function maybeRotateGateway(opts: { reason: string; configPath?: string; now?: number; fs?: GatewayFs }): RotateResult {
   const pool = (process.env.CODEX_GATEWAY_POOL ?? '').split(',').map((h) => h.trim()).filter(Boolean)
   if (pool.length < 2) return { rotated: false, why: pool.length === 0 ? 'CODEX_GATEWAY_POOL unset — rotation off' : 'pool has a single entry' }
   if (!isQuotaWall(opts.reason)) return { rotated: false, why: 'not a quota wall' }
 
+  const fs = opts.fs ?? localFs
   const configPath = opts.configPath ?? defaultConfigPath()
-  if (!existsSync(configPath)) return { rotated: false, why: `no codex config at ${configPath}` }
-  const config = readFileSync(configPath, 'utf8')
+  const config = fs.read(configPath)
+  if (config === null) return { rotated: false, why: `no codex config at ${configPath}` }
   const i = pool.findIndex((host) => config.includes(host))
   if (i === -1) return { rotated: false, why: 'no pool gateway in codex config' }
 
   const now = opts.now ?? Date.now()
   const cooldownMs = Number(process.env.CODEX_ROTATE_COOLDOWN_MIN || 10) * 60_000
   const stampPath = configPath + '.rotated-at'
-  if (existsSync(stampPath)) {
-    const last = Number(readFileSync(stampPath, 'utf8'))
+  const stamp = fs.read(stampPath)
+  if (stamp !== null) {
+    const last = Number(stamp)
     if (Number.isFinite(last) && now - last < cooldownMs) return { rotated: false, why: 'rotated recently — cooling down' }
   }
 
   const from = pool[i] as string
   const to = pool[(i + 1) % pool.length] as string
-  writeFileSync(configPath, config.replaceAll(from, to))
-  writeFileSync(stampPath, String(now))
+  fs.write(configPath, config.replaceAll(from, to))
+  fs.write(stampPath, String(now))
   return { rotated: true, from, to }
 }

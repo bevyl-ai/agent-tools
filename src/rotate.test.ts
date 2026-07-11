@@ -85,6 +85,15 @@ test('rotation is off without a pool, or with a single-entry pool', () => {
   expect(readFileSync(configPath, 'utf8')).toBe(CONFIG)
 })
 
+test('injected fs (remote worker) is used for both config and stamp', () => {
+  const files: Record<string, string> = { '/remote/config.toml': CONFIG }
+  const fs = { read: (p: string) => files[p] ?? null, write: (p: string, t: string) => void (files[p] = t) }
+  const r = maybeRotateGateway({ reason: 'usage limit', configPath: '/remote/config.toml', now: 1000, fs })
+  expect(r).toEqual({ rotated: true, from: 'llm.int.exe.xyz', to: 'llm-3.int.exe.xyz' })
+  expect(files['/remote/config.toml']).toContain('llm-3.int.exe.xyz')
+  expect(files['/remote/config.toml.rotated-at']).toBe('1000')
+})
+
 test('config pointing outside the pool is left alone', () => {
   writeFileSync(configPath, CONFIG.replace('llm.int.exe.xyz', 'llm-2.int.exe.xyz'))
   const r = maybeRotateGateway({ reason: 'usage limit', configPath, now: 1000 })
