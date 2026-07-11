@@ -61,7 +61,7 @@ export function notionApiTool(fetchFn: typeof fetch = fetch): DynamicTool {
             'Notion-Version': NOTION_VERSION,
             ...(a.body ? { 'Content-Type': 'application/json' } : {}),
           },
-          body: a.body ? JSON.stringify(a.body) : undefined,
+          ...(a.body ? { body: JSON.stringify(a.body) } : {}),
         })
         const text = await res.text()
         if (!res.ok) return fail(`notion ${res.status}: ${text.slice(0, 2000)}`)

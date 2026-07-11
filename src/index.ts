@@ -2,7 +2,7 @@
 // Domain tools (a project's tracker access, PR build gates) stay in the consuming project; only what is genuinely
 // reusable lives here.
 export * from './types'
-export { isQuotaWall, maybeRotateGateway, type RotateResult } from './rotate'
+export { isQuotaWall, maybeRotateGateway, type GatewayFs, type RotateResult } from './rotate'
 export { AppServerSession, type SessionHooks } from './app-server'
 export { opsReadTool, resolveOpsRequest } from './ops-read'
 export { dbReadTool, validateReadQuery } from './db-read'

@@ -56,7 +56,7 @@ export function githubApiTool(fetchFn: typeof fetch = fetch): DynamicTool {
             'User-Agent': 'bevyl-agent-kit',
             ...(a.body ? { 'Content-Type': 'application/json' } : {}),
           },
-          body: a.body ? JSON.stringify(a.body) : undefined,
+          ...(a.body ? { body: JSON.stringify(a.body) } : {}),
         })
         const text = await res.text()
         if (!res.ok) return fail(`github ${res.status}: ${text.slice(0, 2000)}`)
