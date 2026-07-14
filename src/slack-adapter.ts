@@ -28,7 +28,11 @@ export function reconnectDelay(attempt: number, opts: { baseMs: number; maxMs: n
   return Math.round(ceil / 2 + rng() * (ceil / 2));
 }
 
-const SUBTYPE_ALLOWLIST = new Set([undefined, "bot_message"]);
+// Subtypes that are NEW content someone just said (2026-07-14: a human message with an uploaded
+// file arrives as `file_share`, and an also-send-to-channel reply as `thread_broadcast` — dropping
+// those made the agent deaf to every screenshot-bearing ask). Edits, deletes, joins, topic
+// changes etc. stay excluded: they have no retroactive effect (§12.2).
+const SUBTYPE_ALLOWLIST = new Set([undefined, "bot_message", "file_share", "thread_broadcast"]);
 
 function venueKindOf(channelType: string): VenueKind {
   if (channelType === "im") return "dm";

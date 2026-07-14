@@ -1,5 +1,42 @@
 import { afterEach, expect, test } from "bun:test";
-import { SlackAdapter } from "./slack-adapter";
+import { normalizeSlackEvent, SlackAdapter } from "./slack-adapter";
+
+// 2026-07-14: a human message with an uploaded file arrives as subtype `file_share` — dropping it
+// made the agent deaf to every screenshot-bearing ask (all file-bearing events on record were bots).
+test("normalize: a human message with an uploaded file (subtype file_share) is delivered with its files", () => {
+  const msg = normalizeSlackEvent(
+    {
+      type: "message",
+      subtype: "file_share",
+      ts: "100.1",
+      channel: "C1",
+      channel_type: "channel",
+      user: "U1",
+      text: "<@B1> can you write similar text for this?",
+      files: [{ id: "F1", name: "shot.png", mimetype: "image/png", url_private: "https://files.slack.com/x", size: 5 }],
+    },
+    "B1",
+  );
+  expect(msg).not.toBeNull();
+  expect(msg!.files).toEqual([{ id: "F1", name: "shot.png", mimetype: "image/png", urlPrivate: "https://files.slack.com/x", size: 5 }]);
+  expect(msg!.mentionsBotId).toBe(true);
+  expect(msg!.isBot).toBe(false);
+});
+
+test("normalize: an also-send-to-channel reply (subtype thread_broadcast) is delivered, threaded", () => {
+  const msg = normalizeSlackEvent(
+    { type: "message", subtype: "thread_broadcast", ts: "100.2", thread_ts: "100.1", channel: "C1", channel_type: "channel", user: "U1", text: "hi" },
+    "B1",
+  );
+  expect(msg).not.toBeNull();
+  expect(msg!.threadRootTs).toBe("100.1");
+});
+
+test("normalize: edits and other non-content subtypes stay dropped", () => {
+  for (const subtype of ["message_changed", "message_deleted", "channel_join", "channel_topic"]) {
+    expect(normalizeSlackEvent({ type: "message", subtype, ts: "100.3", channel: "C1", user: "U1", text: "x" }, "B1")).toBeNull();
+  }
+});
 
 // A fake Slack: one Bun.serve standing in for both slack.com/api (apps.connections.open points
 // the adapter at the local websocket endpoint) and the Socket Mode server itself. `pingEveryMs`
