@@ -12,6 +12,11 @@ export interface SlackConfig {
   connectionCount?: number; // default 2
   reconnectBaseMs?: number; // default 1000
   reconnectMaxMs?: number; // default 30000
+  // Liveness watchdog (2026-07-14 outage): a network path drop can leave a socket half-open — the
+  // kernel still says ESTAB, no close frame ever arrives, and the `close`-event-driven reconnect
+  // never fires. Slack's Socket Mode server sends WS protocol pings every few seconds, so a socket
+  // with NO inbound frames for this long is dead and gets replaced.
+  silentAfterMs?: number; // default 180000 (3 min)
 }
 
 // M9: exponential backoff with equal jitter for reconnect attempts — grows base·2^attempt capped
@@ -170,6 +175,9 @@ export class SlackAdapter implements SurfaceAdapter {
   private handlers: Array<(msg: RawMessage) => void> = [];
   private stopped = false;
   private sockets = new Set<WebSocket>(); // the live connection pool
+  private lastFrameAt = new Map<WebSocket, number>(); // liveness: last inbound frame (ping or message) per socket
+  private replaced = new WeakSet<WebSocket>(); // sockets being replaced — their close must not trigger a reconnect
+  private watchdog: ReturnType<typeof setInterval> | null = null;
   private teamId: string | null = null; // cached from auth.test — required by chat.startStream
   private botName: string | null = null; // cached from auth.test — plain-name passive listening
   private workspaceUrl: string | null = null; // cached from auth.test — permalink construction
@@ -201,10 +209,15 @@ export class SlackAdapter implements SurfaceAdapter {
     const opens: Promise<void>[] = [];
     for (let i = 0; i < count; i++) opens.push(this.openConnection(i));
     await Promise.any(opens);
+    const silentAfterMs = this.cfg.silentAfterMs ?? 180_000;
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = setInterval(() => this.cycleSilentSockets(silentAfterMs), silentAfterMs / 2);
   }
 
   stop(): void {
     this.stopped = true;
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = null;
     for (const ws of this.sockets) {
       try {
         ws.close();
@@ -213,6 +226,7 @@ export class SlackAdapter implements SurfaceAdapter {
       }
     }
     this.sockets.clear();
+    this.lastFrameAt.clear();
   }
 
   private async openConnection(index: number, attempt = 0): Promise<void> {
@@ -232,11 +246,17 @@ export class SlackAdapter implements SurfaceAdapter {
     }
 
     const ws = new WebSocket(url);
-    let replaced = false; // set when a `disconnect` frame prompts a graceful replacement
-    ws.addEventListener("message", (ev) => this.onSocketMessage(ws, ev, () => (replaced = true)));
+    ws.addEventListener("message", (ev) => {
+      this.lastFrameAt.set(ws, Date.now());
+      this.onSocketMessage(ws, ev);
+    });
+    // Slack pings every few seconds at the WS protocol level; Bun's client WebSocket surfaces
+    // those as "ping" events (and pongs automatically). Any inbound frame proves liveness.
+    ws.addEventListener("ping", () => this.lastFrameAt.set(ws, Date.now()));
     ws.addEventListener("close", () => {
       this.sockets.delete(ws);
-      if (this.stopped || replaced) return; // clean shutdown / already replaced — don't reconnect
+      this.lastFrameAt.delete(ws);
+      if (this.stopped || this.replaced.has(ws)) return; // clean shutdown / already replaced — don't reconnect
       this.onLog(`socket ${index} closed unexpectedly, reconnecting`);
       void this.reconnect(index, attempt + 1);
     });
@@ -245,6 +265,7 @@ export class SlackAdapter implements SurfaceAdapter {
     await new Promise<void>((resolve, reject) => {
       ws.addEventListener("open", () => {
         this.sockets.add(ws);
+        this.lastFrameAt.set(ws, Date.now());
         resolve();
       }, { once: true });
       ws.addEventListener("error", (e) => reject(e), { once: true });
@@ -261,7 +282,29 @@ export class SlackAdapter implements SurfaceAdapter {
     return new Promise((r) => setTimeout(r, ms));
   }
 
-  private onSocketMessage(ws: WebSocket, ev: MessageEvent, markReplaced: () => void): void {
+  // The 2026-07-14 outage path: both sockets went half-open after a network drop and the adapter
+  // sat deaf for 11 hours waiting on a `close` event that could never arrive. A socket silent past
+  // the threshold is replaced with the same open-first zero-gap pattern the `disconnect` frame
+  // uses; terminate() rather than close(), because a dead path never completes the close handshake.
+  private cycleSilentSockets(silentAfterMs: number): void {
+    const now = Date.now();
+    for (const ws of this.sockets) {
+      if (this.replaced.has(ws)) continue; // replacement already in flight
+      const last = this.lastFrameAt.get(ws) ?? now;
+      if (now - last < silentAfterMs) continue;
+      this.onLog(`socket silent for ${now - last}ms, replacing`);
+      this.replaced.add(ws);
+      void this.openConnection(this.sockets.size)
+        // terminate() is a Bun extension not yet in the WebSocket type declarations
+        .then(() => (ws as WebSocket & { terminate(): void }).terminate())
+        .catch((e) => {
+          this.replaced.delete(ws); // let its eventual close reconnect normally
+          this.onLog(`silent-socket replacement failed, keeping old socket: ${String(e)}`);
+        });
+    }
+  }
+
+  private onSocketMessage(ws: WebSocket, ev: MessageEvent): void {
     let msg: Record<string, unknown>;
     try {
       msg = JSON.parse(String(ev.data));
@@ -272,7 +315,7 @@ export class SlackAdapter implements SurfaceAdapter {
     // (reason: refresh_requested). Open the replacement FIRST, then close this one — zero-gap
     // failover (the old close-then-reconnect had a brief window with one fewer connection).
     if (msg.type === "disconnect") {
-      markReplaced();
+      this.replaced.add(ws);
       void this.openConnection(this.sockets.size)
         .then(() => {
           try {
@@ -281,7 +324,10 @@ export class SlackAdapter implements SurfaceAdapter {
             // already gone
           }
         })
-        .catch((e) => this.onLog(`disconnect replacement failed, keeping old socket: ${String(e)}`));
+        .catch((e) => {
+          this.replaced.delete(ws); // when Slack force-closes it anyway, reconnect normally
+          this.onLog(`disconnect replacement failed, keeping old socket: ${String(e)}`);
+        });
       return;
     }
     // Ack AFTER handling, not before (§12.2 at-least-once): an envelope acked up front is gone

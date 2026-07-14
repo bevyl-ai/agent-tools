@@ -1,6 +1,6 @@
 {
   "name": "@bevyl-ai/agent-tools",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Shared runtime contract + generic host tools for codex-app-server agents. Codex/exe.dev only \u2014 never the Claude API.",
   "license": "MIT",
   "repository": {
