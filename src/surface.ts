@@ -18,6 +18,10 @@ export interface RawMessage {
   venueId: string;
   venueKind: VenueKind;
   principalId: string | null;
+  // The principal's human-readable name (Slack: display_name/real_name from the adapter's roster
+  // cache), for prompt rendering — a bare surface id is meaningless to a model judging who is
+  // talking to whom. Absent when the roster hasn't resolved the id (yet); principalId stays the key.
+  principalName?: string;
   isBot: boolean;
   text: string;
   ts: string;

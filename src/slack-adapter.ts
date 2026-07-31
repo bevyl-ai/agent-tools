@@ -73,6 +73,16 @@ export function slackPermalink(workspaceUrl: string, channelId: string, ts: stri
   return `${workspaceUrl.replace(/\/$/, "")}/archives/${channelId}/p${ts.replace(".", "")}`;
 }
 
+// A workspace member's human-readable name, by Slack's own precedence: the display name the
+// person chose, else their real name, else the account handle. Empty string when nothing usable.
+export function displayNameOf(member: Record<string, unknown>): string {
+  const profile = (member.profile ?? {}) as Record<string, unknown>;
+  for (const v of [profile.display_name, profile.real_name, member.real_name, member.name]) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
 // A message's readable content. Integrations (Datadog, PagerDuty, ...) often post with an EMPTY
 // top-level text and the entire alert in legacy attachments — without draining those, an alert
 // arrives as a blank line and ambient has nothing to evaluate.
@@ -185,6 +195,11 @@ export class SlackAdapter implements SurfaceAdapter {
   private teamId: string | null = null; // cached from auth.test — required by chat.startStream
   private botName: string | null = null; // cached from auth.test — plain-name passive listening
   private workspaceUrl: string | null = null; // cached from auth.test — permalink construction
+  // id → name roster (users:read). Prewarmed at start, then filled lazily: dispatch stays
+  // synchronous (the ack-after-handling contract), so an unknown id ships bare once while
+  // users.info resolves it in the background for every later message.
+  private names = new Map<string, string>();
+  private nameLookups = new Set<string>(); // ids with a users.info already in flight (or failed — no retry storms)
 
   constructor(
     private cfg: SlackConfig,
@@ -206,6 +221,7 @@ export class SlackAdapter implements SurfaceAdapter {
         if (r.ok && typeof r.url === "string") this.workspaceUrl = r.url; // e.g. "https://acme.slack.com/"
       })
       .catch(() => {});
+    void this.loadRoster().catch((e) => this.onLog(`users.list roster prewarm failed (names resolve lazily): ${String(e)}`));
     const count = this.cfg.connectionCount ?? 2;
     // Open all connections; resolve once the first is live so the service can proceed — the rest
     // finish opening in the background. An event racing two sockets is harmless (the events UNIQUE
@@ -374,7 +390,47 @@ export class SlackAdapter implements SurfaceAdapter {
       return;
     }
     const normalized = normalizeSlackEvent(event, this.cfg.botUserId, this.botName);
-    if (normalized) for (const handler of this.handlers) handler(normalized);
+    if (normalized) {
+      const named = this.withPrincipalName(normalized);
+      for (const handler of this.handlers) handler(named);
+    }
+  }
+
+  // Attach the roster name synchronously (dispatch must not await); an unresolved user id kicks
+  // off ONE background users.info so the person's next message arrives named.
+  private withPrincipalName(msg: RawMessage): RawMessage {
+    if (!msg.principalId) return msg;
+    const name = this.names.get(msg.principalId);
+    if (name) return { ...msg, principalName: name };
+    if (/^[UW]/.test(msg.principalId) && !this.nameLookups.has(msg.principalId)) {
+      this.nameLookups.add(msg.principalId);
+      void callSlackApiGet("users.info", this.cfg.botToken, { user: msg.principalId })
+        .then((r) => {
+          const n = r.ok ? displayNameOf((r.user ?? {}) as Record<string, unknown>) : "";
+          if (n) this.names.set(msg.principalId!, n);
+        })
+        .catch(() => {});
+    }
+    return msg;
+  }
+
+  // Prewarm the roster (users.list, paginated). Best-effort: without users:read this logs once
+  // and every message simply ships without a principalName, exactly as before names existed.
+  private async loadRoster(): Promise<void> {
+    let cursor = "";
+    for (let page = 0; page < 20; page++) {
+      const params: Record<string, string | number> = { limit: 200 };
+      if (cursor) params.cursor = cursor;
+      const result = await callSlackApiGet("users.list", this.cfg.botToken, params);
+      if (!result.ok) throw new Error(String(result.error));
+      for (const m of (Array.isArray(result.members) ? result.members : []) as Record<string, unknown>[]) {
+        const id = typeof m.id === "string" ? m.id : "";
+        const name = displayNameOf(m);
+        if (id && name) this.names.set(id, name);
+      }
+      cursor = String((result.response_metadata as Record<string, unknown> | undefined)?.next_cursor ?? "");
+      if (!cursor) return;
+    }
   }
 
   async postMessage(venueId: string, threadRootTs: string | null, text: string): Promise<PostResult> {
