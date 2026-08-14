@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import type { DynamicTool } from './types'
 
 // The `linear_graphql` host tool: a single raw GraphQL operation per call against Linear, executed
@@ -37,8 +38,19 @@ export function linearGraphqlTool(fetchFn: typeof fetch = fetch): DynamicTool {
       const a = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : {}
       const query = typeof a.query === 'string' ? a.query : ''
       if (!query.trim()) return fail('missing_query')
-      const apiKey = process.env.LINEAR_API_KEY
-      if (!apiKey) return fail('not_configured: LINEAR_API_KEY is unset on this brain — if this call is essential, record it as a blocker for the operator; do not retry.')
+      let apiKey = process.env.LINEAR_API_KEY
+      // LINEAR_TOKEN_FILE wins when set: OAuth access tokens rotate on a timer (a refresh
+      // service rewrites the file), so the credential is re-read on EVERY call — a long-lived
+      // process must never pin a token that expired under it. Unreadable file falls back to env.
+      const tokenFile = process.env.LINEAR_TOKEN_FILE
+      if (tokenFile) {
+        try {
+          apiKey = (await readFile(tokenFile, 'utf8')).trim()
+        } catch {
+          /* fall back to LINEAR_API_KEY */
+        }
+      }
+      if (!apiKey) return fail('not_configured: neither LINEAR_TOKEN_FILE nor LINEAR_API_KEY is usable on this brain — if this call is essential, record it as a blocker for the operator; do not retry.')
       try {
         const res = await fetchFn('https://api.linear.app/graphql', {
           method: 'POST',
