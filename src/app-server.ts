@@ -49,6 +49,7 @@ export class AppServerSession {
   private fatal: Error | null = null
   private hookCleanup: (() => void) | null = null
   private lastActivityAt = 0
+  private pendingToolCalls = 0
 
   constructor(codex: CodexConfig, tools: DynamicTool[], onEvent: (e: AgentEvent) => void = () => {}, hooks?: SessionHooks) {
     this.codex = codex
@@ -57,9 +58,13 @@ export class AppServerSession {
     this.hooks = hooks
   }
 
-  // Wall-clock ms since the last JSON-RPC activity (message sent or received) — a process-liveness signal distinct
-  // from turnTimeoutMs (total turn duration). A caller's stall watchdog can use it; callers that don't, ignore it.
+  // Wall-clock ms since the last runtime activity — a process-liveness signal distinct from turnTimeoutMs (total
+  // turn duration). Activity is JSON-RPC traffic (message sent or received) OR a host tool call still executing:
+  // while the host runs a dynamic tool (a db_read query, a github_read fetch) the wire is silent by design, and
+  // counting that silence as a stall killed live turns 45s into their own tool's work (2026-08-26). A caller's
+  // stall watchdog can use it; callers that don't, ignore it.
   msSinceLastActivity(now: number = Date.now()): number {
+    if (this.pendingToolCalls > 0) return 0
     return now - this.lastActivityAt
   }
 
@@ -331,11 +336,17 @@ export class AppServerSession {
       this.reply(id, toolResult(false, `Unsupported dynamic tool: ${name}`))
       return
     }
+    // The counter (not a boolean — tool calls can overlap) marks the whole run as activity for
+    // msSinceLastActivity. Entry/exit need no timestamp bumps: the call request arrived via onData
+    // and the reply leaves via send, so the clock hands off cleanly on both edges.
+    this.pendingToolCalls++
     try {
       const r = await tool.run(params.arguments ?? {})
       this.reply(id, toolResult(r.success, r.output))
     } catch (e) {
       this.reply(id, toolResult(false, e instanceof Error ? e.message : String(e)))
+    } finally {
+      this.pendingToolCalls--
     }
   }
 
