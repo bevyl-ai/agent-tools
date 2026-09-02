@@ -507,7 +507,6 @@ export class SlackAdapter implements SurfaceAdapter {
     if (!result.ok && result.error !== "already_reacted") throw new Error(`reactions.add failed: ${result.error}`);
   }
 
-  // Slack's native "Marvin is typing…" status via the Assistants API (assistant.threads.setStatus).
   // Best-effort by contract (§12.1 OPTIONAL) and by nature: it only applies in the app's Assistant
   // threads and needs the `assistant:write` scope + the "Agents & AI Apps" feature enabled, so a
   // failure (wrong venue kind, missing scope) is swallowed, not thrown — the reply still lands.
@@ -559,15 +558,13 @@ export class SlackAdapter implements SurfaceAdapter {
     if (!result.ok) this.onLog(`chat.stopStream: ${result.error}`);
   }
 
-  async setTypingStatus(venueId: string, threadRootTs: string | null, status: string, loadingMessages?: string[]): Promise<void> {
-    const body: Record<string, unknown> = {
+  async setSessionStatus(venueId: string, threadTs: string, status: "processing" | "closed"): Promise<void> {
+    const result = await callSlackApi("agents.sessions.setStatus", this.cfg.botToken, {
       channel_id: venueId,
-      thread_ts: threadRootTs ?? "",
-      status, // empty string clears the indicator
-    };
-    if (loadingMessages?.length) body.loading_messages = loadingMessages.slice(0, 10);
-    const result = await callSlackApi("assistant.threads.setStatus", this.cfg.botToken, body);
-    if (!result.ok) this.onLog(`assistant.threads.setStatus: ${result.error}`);
+      thread_ts: threadTs,
+      status,
+    });
+    if (!result.ok) this.onLog(`agents.sessions.setStatus: ${result.error}`);
   }
 
   // The clickable starter chips shown in a fresh Assistant pane (assistant.threads.setSuggestedPrompts).

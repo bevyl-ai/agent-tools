@@ -55,11 +55,11 @@ export interface SurfaceAdapter {
   readThread?(venueId: string, threadTs: string, limit?: number): Promise<{ user: string | null; text: string; ts: string; files?: MessageFile[] }[]>;
   // Build a permalink for a message on this surface (receipts for search hits and citations).
   permalink?(venueId: string, messageId: string): string | undefined;
-  // SPEC §12.1 OPTIONAL "typing/status indication". Best-effort: a surface that lacks it, or a
-  // venue where it doesn't apply, is a silent no-op — callers must not depend on it. A non-empty
-  // `status` shows the shimmering "<App> is thinking…" indicator in the thread; an empty string
-  // clears it. `loadingMessages` (Slack: up to 10) rotate while the status is showing.
-  setTypingStatus?(venueId: string, threadRootTs: string | null, status: string, loadingMessages?: string[]): Promise<void>;
+  // SPEC §12.1 OPTIONAL "typing/status indication" as the surface's native agent session (Slack
+  // agents.sessions.setStatus): "processing" shows the surface's own loading UX on the thread;
+  // "closed" ends it. Best-effort: a surface that lacks it, or a venue where it doesn't apply, is
+  // a silent no-op — callers must not depend on it.
+  setSessionStatus?(venueId: string, threadTs: string, status: "processing" | "closed"): Promise<void>;
   // Native surface streaming (Slack chat.startStream/appendStream/stopStream): the real in-channel
   // "…is thinking…" shimmer + live token stream. Requires a thread (thread_ts) and the recipient's
   // id. Optional — a surface without it (or a venue where streaming can't start) falls back to the
