@@ -535,7 +535,9 @@ export class SlackAdapter implements SurfaceAdapter {
     };
     const result = await callSlackApi("chat.startStream", this.cfg.botToken, body);
     if (!result.ok || typeof result.ts !== "string") {
-      this.onLog(`chat.startStream: ${result.error ?? "no ts"}`);
+      // Slack spells out invalid_arguments in response_metadata.messages; surface it or the error is opaque.
+      const detail = (result as { response_metadata?: { messages?: string[] } }).response_metadata?.messages?.join("; ");
+      this.onLog(`chat.startStream: ${result.error ?? "no ts"}${detail ? ` — ${detail}` : ""}`);
       return null;
     }
     return { messageId: result.ts };
