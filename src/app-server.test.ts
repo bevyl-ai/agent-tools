@@ -2,11 +2,9 @@ import { expect, test } from 'bun:test'
 import { AppServerSession } from './app-server'
 import type { CodexConfig, DynamicTool } from './types'
 
-// msSinceLastActivity must report "active" while a host tool call is executing: the wire is silent
-// during the host's own work (a db_read query, a github_read fetch), and a stall watchdog reading
-// wire-silence alone killed live turns 45s into their own tool's work (2026-08-26). These tests
-// drive the real dispatch path (item/tool/call → handleToolCall) without spawning codex — the
-// constructor doesn't spawn, and replies to a null proc are safe no-ops.
+// msSinceLastActivity reports "active" while a host tool call is executing. These tests drive the
+// real dispatch path (item/tool/call → handleToolCall) without spawning codex: the constructor
+// doesn't spawn, and replies to a null proc are safe no-ops.
 
 const CODEX: CodexConfig = {
   command: 'codex app-server',

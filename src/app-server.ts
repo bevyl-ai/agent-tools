@@ -58,11 +58,8 @@ export class AppServerSession {
     this.hooks = hooks
   }
 
-  // Wall-clock ms since the last runtime activity — a process-liveness signal distinct from turnTimeoutMs (total
-  // turn duration). Activity is JSON-RPC traffic (message sent or received) OR a host tool call still executing:
-  // while the host runs a dynamic tool (a db_read query, a github_read fetch) the wire is silent by design, and
-  // counting that silence as a stall killed live turns 45s into their own tool's work (2026-08-26). A caller's
-  // stall watchdog can use it; callers that don't, ignore it.
+  // Wall-clock ms since the last runtime activity: JSON-RPC traffic, or a host tool call still executing (the
+  // wire is silent while the host runs a dynamic tool). A process-liveness signal for a caller's stall watchdog.
   msSinceLastActivity(now: number = Date.now()): number {
     if (this.pendingToolCalls > 0) return 0
     return now - this.lastActivityAt
@@ -336,9 +333,7 @@ export class AppServerSession {
       this.reply(id, toolResult(false, `Unsupported dynamic tool: ${name}`))
       return
     }
-    // The counter (not a boolean — tool calls can overlap) marks the whole run as activity for
-    // msSinceLastActivity. Entry/exit need no timestamp bumps: the call request arrived via onData
-    // and the reply leaves via send, so the clock hands off cleanly on both edges.
+    // A counter, not a boolean: tool calls can overlap.
     this.pendingToolCalls++
     try {
       const r = await tool.run(params.arguments ?? {})
