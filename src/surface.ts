@@ -36,6 +36,8 @@ export interface PostResult {
 }
 
 // The REQUIRED operations from SPEC §12.1. Real: adapter/slack.ts. Fake: test/fakes/fake-adapter.ts.
+export type SessionStatus = "processing" | "suspended" | "closed";
+
 export interface SurfaceAdapter {
   start(): Promise<void>;
   stop(): void;
@@ -56,10 +58,11 @@ export interface SurfaceAdapter {
   // Build a permalink for a message on this surface (receipts for search hits and citations).
   permalink?(venueId: string, messageId: string): string | undefined;
   // SPEC §12.1 OPTIONAL "typing/status indication" as the surface's native agent session (Slack
-  // agents.sessions.setStatus): "processing" shows the surface's own loading UX on the thread;
-  // "closed" ends it. Best-effort: a surface that lacks it, or a venue where it doesn't apply, is
-  // a silent no-op — callers must not depend on it.
-  setSessionStatus?(venueId: string, threadTs: string, status: "processing" | "closed"): Promise<void>;
+  // agents.sessions.setStatus): "processing" shows the surface's own loading UX on the thread,
+  // "suspended" its needs-you state, "closed" ends it. `title` names the session (applied on
+  // creation only). Best-effort: a surface that lacks it, or a venue where it doesn't apply, is a
+  // silent no-op — callers must not depend on it.
+  setSessionStatus?(venueId: string, threadTs: string, status: SessionStatus, title?: string): Promise<void>;
   // Native surface streaming (Slack chat.startStream/appendStream/stopStream): the real in-channel
   // "…is thinking…" shimmer + live token stream. Requires a thread (thread_ts) and the recipient's
   // id. Optional — a surface without it (or a venue where streaming can't start) falls back to the

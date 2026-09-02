@@ -212,15 +212,7 @@ export class SlackAdapter implements SurfaceAdapter {
 
   async start(): Promise<void> {
     this.stopped = false;
-    // Cache the workspace team id once — chat.startStream requires recipient_team_id. Best-effort:
-    // streaming just falls back to post-and-edit if this is unavailable.
-    void callSlackApi("auth.test", this.cfg.botToken, {})
-      .then((r) => {
-        if (r.ok && typeof r.team_id === "string") this.teamId = r.team_id;
-        if (r.ok && typeof r.user === "string") this.botName = r.user; // e.g. "marvin"
-        if (r.ok && typeof r.url === "string") this.workspaceUrl = r.url; // e.g. "https://acme.slack.com/"
-      })
-      .catch(() => {});
+    void this.cacheAuth();
     void this.loadRoster().catch((e) => this.onLog(`users.list roster prewarm failed (names resolve lazily): ${String(e)}`));
     const count = this.cfg.connectionCount ?? 2;
     // Open all connections; resolve once the first is live so the service can proceed — the rest
@@ -513,7 +505,25 @@ export class SlackAdapter implements SurfaceAdapter {
   // Native Slack streaming (chat.startStream) — the real in-channel "…is thinking…" shimmer + live
   // token stream. Requires a thread_ts + recipient user/team. Returns the streaming message id to
   // append/stop against, or null if it couldn't start (caller falls back to post-and-edit).
+  // Workspace identity from auth.test: team id (chat.startStream requires recipient_team_id), bot
+  // name (plain-name passive listening), workspace url (permalinks).
+  private async cacheAuth(): Promise<void> {
+    try {
+      const r = await callSlackApi("auth.test", this.cfg.botToken, {});
+      if (r.ok && typeof r.team_id === "string") this.teamId = r.team_id;
+      if (r.ok && typeof r.user === "string") this.botName = r.user;
+      if (r.ok && typeof r.url === "string") this.workspaceUrl = r.url;
+    } catch {
+      // best-effort; callers that need a field fall back
+    }
+  }
+
   async startStream(venueId: string, threadRootTs: string, recipientUserId: string): Promise<{ messageId: string } | null> {
+    if (!this.teamId) await this.cacheAuth();
+    if (!this.teamId) {
+      this.onLog("chat.startStream: no team id (auth.test unavailable)");
+      return null;
+    }
     const body: Record<string, unknown> = {
       channel: venueId,
       thread_ts: threadRootTs,
@@ -521,8 +531,8 @@ export class SlackAdapter implements SurfaceAdapter {
       // "plan": task_update chunks render as ONE compact grouped checklist that ticks in place —
       // not the default timeline's stack of separate full-width cards.
       task_display_mode: "plan",
+      recipient_team_id: this.teamId,
     };
-    if (this.teamId) body.recipient_team_id = this.teamId;
     const result = await callSlackApi("chat.startStream", this.cfg.botToken, body);
     if (!result.ok || typeof result.ts !== "string") {
       this.onLog(`chat.startStream: ${result.error ?? "no ts"}`);
@@ -558,11 +568,12 @@ export class SlackAdapter implements SurfaceAdapter {
     if (!result.ok) this.onLog(`chat.stopStream: ${result.error}`);
   }
 
-  async setSessionStatus(venueId: string, threadTs: string, status: "processing" | "closed"): Promise<void> {
+  async setSessionStatus(venueId: string, threadTs: string, status: "processing" | "suspended" | "closed", title?: string): Promise<void> {
     const result = await callSlackApi("agents.sessions.setStatus", this.cfg.botToken, {
       channel_id: venueId,
       thread_ts: threadTs,
       status,
+      ...(title ? { title } : {}),
     });
     if (!result.ok) this.onLog(`agents.sessions.setStatus: ${result.error}`);
   }
