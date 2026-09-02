@@ -36,7 +36,7 @@ export interface PostResult {
 }
 
 // The REQUIRED operations from SPEC §12.1. Real: adapter/slack.ts. Fake: test/fakes/fake-adapter.ts.
-export type SessionStatus = "processing" | "suspended" | "closed";
+export type SessionStatus = "processing" | "active" | "suspended" | "closed";
 
 export interface SurfaceAdapter {
   start(): Promise<void>;
@@ -59,7 +59,8 @@ export interface SurfaceAdapter {
   permalink?(venueId: string, messageId: string): string | undefined;
   // SPEC §12.1 OPTIONAL "typing/status indication" as the surface's native agent session (Slack
   // agents.sessions.setStatus): "processing" shows the surface's own loading UX on the thread,
-  // "suspended" its needs-you state, "closed" ends it. `title` names the session (applied on
+  // "active" is alive and ready for the next prompt, "suspended" its needs-you state, "closed"
+  // ends it. `title` names the session (applied on
   // creation only). Best-effort: a surface that lacks it, or a venue where it doesn't apply, is a
   // silent no-op — callers must not depend on it.
   setSessionStatus?(venueId: string, threadTs: string, status: SessionStatus, title?: string): Promise<void>;

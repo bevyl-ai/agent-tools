@@ -570,7 +570,7 @@ export class SlackAdapter implements SurfaceAdapter {
     if (!result.ok) this.onLog(`chat.stopStream: ${result.error}`);
   }
 
-  async setSessionStatus(venueId: string, threadTs: string, status: "processing" | "suspended" | "closed", title?: string): Promise<void> {
+  async setSessionStatus(venueId: string, threadTs: string, status: "processing" | "active" | "suspended" | "closed", title?: string): Promise<void> {
     const result = await callSlackApi("agents.sessions.setStatus", this.cfg.botToken, {
       channel_id: venueId,
       thread_ts: threadTs,
