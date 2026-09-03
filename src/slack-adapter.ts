@@ -1,7 +1,7 @@
 // SPEC §12 — the reference Surface Adapter. Socket Mode over a native WebSocket + fetch (zero new
 // dependencies: no @slack/bolt or @slack/web-api — Socket Mode's envelope-ack protocol and the
 // handful of REST calls this needs are simple enough not to justify the weight).
-import type { MessageFile, PostResult, RawMessage, SurfaceAdapter, VenueKind } from "./surface";
+import type { MessageFile, PostResult, RawMessage, VenueKind } from "./surface";
 
 export interface SlackConfig {
   botToken: string; // xoxb-...
@@ -185,7 +185,7 @@ async function callSlackApi(method: string, token: string, body: Record<string, 
   return (await res.json()) as SlackApiResponse;
 }
 
-export class SlackAdapter implements SurfaceAdapter {
+export class SlackAdapter {
   private handlers: Array<(msg: RawMessage) => void> = [];
   private stopped = false;
   private sockets = new Set<WebSocket>(); // the live connection pool
