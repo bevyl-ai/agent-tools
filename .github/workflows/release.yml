@@ -35,7 +35,7 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
-      - name: Check (typecheck + tests)
+      - name: Check (typecheck)
         run: bun run check
 
       - name: Guard version (tag matches package.json, not already published)
