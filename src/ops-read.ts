@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import type { DynamicTool } from './types'
 
 // The `ops_read` host tool: READ-ONLY observability over Trigger.dev, Vercel, Datadog, and Sentry. The host's security
@@ -126,7 +127,7 @@ function describe(): string {
   ].filter(Boolean)
   return (
     'READ-ONLY observability over production systems, executed by the brain (no credentials exist on this VM). ' +
-    'Input: { service: "trigger"|"vercel"|"datadog"|"sentry", path, method?, body? }. Only allowlisted read endpoints run; everything else is refused:\n' +
+    'Only allowlisted read endpoints run; everything else is refused:\n' +
     `• trigger (api.trigger.dev): GET /api/v1/runs (list), /api/v3/runs/:runId (one run: status/attempts/error), /api/v1/projects/:projectRef/runs, /api/v1/deployments/:id.${refs.length ? ` Project refs: ${refs.join(', ')}.` : ''}\n` +
     `• vercel (api.vercel.com): GET /v6/deployments (list — filter ?projectId=…), /v13/deployments/:idOrUrl (one deployment incl. build state), /v3/deployments/:idOrUrl/events (build logs). teamId is appended for you.${process.env.VERCEL_PROJECT_ID ? ` Project id: ${process.env.VERCEL_PROJECT_ID}.` : ''}\n` +
     '• datadog: GET /api/v1/monitor (+/:id), /api/v1/dashboard (+/:id); POST /api/v2/logs/events/search with { body } (log search — the only POST allowed).\n' +
@@ -136,50 +137,33 @@ function describe(): string {
   )
 }
 
-const SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['service', 'path'],
-  properties: {
-    service: { enum: ['trigger', 'vercel', 'datadog', 'sentry', 'slack'], description: 'Which system to read.' },
-    path: { type: 'string', description: 'Absolute API path incl. query string, e.g. /v6/deployments?projectId=…' },
-    method: { enum: ['GET', 'POST'], description: 'Default GET. POST only for the datadog log search endpoint.' },
-    body: { type: 'object', description: '(POST only) JSON request body, e.g. { filter: { query, from, to } }.', additionalProperties: true },
-  },
-}
+const Input = z.object({
+  service: z.enum(['trigger', 'vercel', 'datadog', 'sentry', 'slack']).describe('Which system to read.'),
+  path: z.string().min(1).describe('Absolute API path incl. query string, e.g. /v6/deployments?projectId=…'),
+  method: z.enum(['GET', 'POST']).default('GET').describe('Default GET. POST only for the datadog log search endpoint.'),
+  body: z.record(z.string(), z.unknown()).optional().describe('(POST only) JSON request body, e.g. { filter: { query, from, to } }.'),
+})
 
-export function opsReadTool(): DynamicTool {
+export function opsReadTool(): DynamicTool<z.infer<typeof Input>, string> {
   return {
-    spec: { name: 'ops_read', description: describe(), inputSchema: SCHEMA },
-    async run(args: unknown): Promise<{ success: boolean; output: string }> {
-      const a = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : {}
-      const service = typeof a.service === 'string' ? a.service : ''
-      const path = typeof a.path === 'string' ? a.path.trim() : ''
-      const method = typeof a.method === 'string' ? a.method.toUpperCase() : 'GET'
-      const svc = SERVICES[service]
-      if (!svc) return fail(`unknown_service: ${service || '(missing)'} — one of: ${Object.keys(SERVICES).join(', ')}`)
-      if (!path) return fail('missing_path')
+    name: 'ops_read',
+    description: describe(),
+    input: Input,
+    async run({ service, path, method, body }) {
+      const svc = SERVICES[service]!
       const headers = svc.auth()
       // Missing token = a brain-config gap, not an agent error: say so plainly so the agent reports it as a blocker
       // instead of retrying or inventing credentials.
-      if (!headers) return fail(`not_configured: ${service} is not configured on this brain (${svc.envHint} unset) — if this read is essential, record it as a blocker for the operator; do not retry.`)
-      const req = resolveOpsRequest(service, method, path)
-      if ('error' in req) return fail(req.error)
-      const body = method === 'POST' && a.body && typeof a.body === 'object' && !Array.isArray(a.body) ? JSON.stringify(a.body) : undefined
-      let res: Response
-      try {
-        // 30s network timeout, same as linear.ts — a hung upstream must never wedge the agent's turn.
-        res = await fetch(req.url, { method, headers: body ? { ...headers, 'content-type': 'application/json' } : headers, ...(body ? { body } : {}), signal: AbortSignal.timeout(30_000) })
-      } catch (e) {
-        return fail(`${service}: request failed — ${e instanceof Error ? e.message : String(e)}`)
-      }
+      if (!headers) throw new Error(`not_configured: ${service} is not configured on this brain (${svc.envHint} unset) — if this read is essential, record it as a blocker for the operator; do not retry.`)
+      const req = resolveOpsRequest(service, method, path.trim())
+      if ('error' in req) throw new Error(req.error)
+      const payload = method === 'POST' && body ? JSON.stringify(body) : undefined
+      // 30s network timeout, same as linear.ts — a hung upstream must never wedge the agent's turn.
+      const res = await fetch(req.url, { method, headers: payload ? { ...headers, 'content-type': 'application/json' } : headers, ...(payload ? { body: payload } : {}), signal: AbortSignal.timeout(30_000) })
       const text = await res.text()
       const out = text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n…[truncated ${text.length - MAX_OUTPUT} of ${text.length} chars — narrow the query]` : text
-      return { success: res.ok, output: `HTTP ${res.status}\n${out}` }
+      if (!res.ok) throw new Error(`HTTP ${res.status}\n${out}`)
+      return `HTTP ${res.status}\n${out}`
     },
   }
-}
-
-function fail(message: string): { success: false; output: string } {
-  return { success: false, output: JSON.stringify({ error: { message } }, null, 2) }
 }

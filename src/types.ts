@@ -1,3 +1,4 @@
+import type { z } from 'zod'
 // The runtime-agnostic contract shared by every codex-app-server agent (bunion, tag, …): the tool shape, the event
 // stream a session emits, the codex settings a session needs, and the categorized-error class. Nothing here knows
 // about Linear, GitHub, PRs, or any one project's domain — those live in the consuming project. Keeping this the
@@ -60,7 +61,13 @@ export interface CodexConfig {
 }
 
 // A host-side dynamic tool offered to the agent over the app-server (e.g. ops_read, db_read, linear_graphql).
-export interface DynamicTool {
-  spec: { name: string; description: string; inputSchema: Record<string, unknown> }
-  run(args: unknown): Promise<{ success: boolean; output: string }>
+// The session validates the model's arguments against `input` before calling `run`, and sends back whatever
+// `run` returns (a string as-is, anything else JSON-encoded). A thrown error is the tool's failure message.
+export interface DynamicTool<I = unknown, O = unknown> {
+  name: string
+  description: string
+  input: z.ZodType<I>
+  run(input: I): Promise<O>
 }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyTool = DynamicTool<any, any>

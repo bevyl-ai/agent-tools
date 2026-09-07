@@ -1,6 +1,7 @@
+import { z } from 'zod'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { CategorizedError } from './types'
-import type { AgentEvent, CodexConfig, DynamicTool, RateLimits } from './types'
+import type { AgentEvent, AnyTool, CodexConfig, RateLimits } from './types'
 
 // §10.1: cap the line accumulation buffer so a monster line never OOMs the process.
 const MAX_LINE_BYTES = 10 * 1024 * 1024 // 10 MB
@@ -39,7 +40,7 @@ export interface SessionHooks {
 // approvals, user-input) are answered inline so an unattended turn never stalls. Faithful to Symphony's AppServer.
 export class AppServerSession {
   private codex: CodexConfig
-  private tools: Map<string, DynamicTool>
+  private tools: Map<string, AnyTool>
   private onEvent: (e: AgentEvent) => void
   private hooks: SessionHooks | undefined
   private msgBuf = new Map<string, string>() // accumulates agent-message text deltas by itemId
@@ -53,9 +54,9 @@ export class AppServerSession {
   private lastActivityAt = 0
   private pendingToolCalls = 0
 
-  constructor(codex: CodexConfig, tools: DynamicTool[], onEvent: (e: AgentEvent) => void = () => {}, hooks?: SessionHooks) {
+  constructor(codex: CodexConfig, tools: AnyTool[], onEvent: (e: AgentEvent) => void = () => {}, hooks?: SessionHooks) {
     this.codex = codex
-    this.tools = new Map(tools.map((t) => [t.spec.name, t]))
+    this.tools = new Map(tools.map((t) => [t.name, t]))
     this.onEvent = onEvent
     this.hooks = hooks
   }
@@ -135,7 +136,7 @@ export class AppServerSession {
         approvalPolicy: this.codex.approvalPolicy,
         sandbox: this.codex.threadSandbox,
         cwd: workspace,
-        dynamicTools: [...this.tools.values()].map((t) => t.spec),
+        dynamicTools: [...this.tools.values()].map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.input) })),
       },
       this.codex.initTimeoutMs, // thread setup on a cold/loaded VM exceeds the steady-state read timeout
     )
@@ -360,8 +361,13 @@ export class AppServerSession {
     // A counter, not a boolean: tool calls can overlap.
     this.pendingToolCalls++
     try {
-      const r = await tool.run(params.arguments ?? {})
-      this.reply(id, toolResult(r.success, r.output))
+      const parsed = tool.input.safeParse(params.arguments ?? {})
+      if (!parsed.success) {
+        this.reply(id, toolResult(false, z.prettifyError(parsed.error)))
+        return
+      }
+      const r: unknown = await tool.run(parsed.data)
+      this.reply(id, toolResult(true, typeof r === 'string' ? r : JSON.stringify(r)))
     } catch (e) {
       this.reply(id, toolResult(false, e instanceof Error ? e.message : String(e)))
     } finally {

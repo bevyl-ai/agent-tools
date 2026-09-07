@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import type { DynamicTool } from './types'
 
 // The `db_read` host tool: READ-ONLY SQL over the production Postgres, executed by the brain as a dedicated
@@ -29,47 +30,32 @@ export function validateReadQuery(raw: string): { query: string } | { error: str
 // Lazy, module-scoped so the connection pool is reused across a session's turns rather than reconnecting each call.
 let pool: Bun.SQL | null = null
 
-const SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['query'],
-  properties: {
-    query: { type: 'string', description: 'A single read-only SQL statement (SELECT / WITH / EXPLAIN / SHOW). No writes, no stacked statements.' },
-  },
-}
+const Input = z.object({
+  query: z.string().min(1).describe('A single read-only SQL statement (SELECT / WITH / EXPLAIN / SHOW). No writes, no stacked statements.'),
+})
 
 const DESCRIPTION =
   'READ-ONLY SQL over the production Postgres, executed by the brain as a SELECT-only role (no DB credentials on this VM). ' +
-  'Input: { query }. One read statement only (SELECT / WITH / EXPLAIN / SHOW) — writes are impossible (the role has no write grants) and stacked statements are refused. ' +
+  'One read statement only (SELECT / WITH / EXPLAIN / SHOW) — writes are impossible (the role has no write grants) and stacked statements are refused. ' +
   'Rows come back as JSON (capped). Use it to inspect prod data the API tools can\'t reach — eval scores, metering_events rows, a project\'s live state — instead of dead-ending on "can\'t read the DB".'
 
-export function dbReadTool(): DynamicTool {
+export function dbReadTool(): DynamicTool<z.infer<typeof Input>, string> {
   return {
-    spec: { name: 'db_read', description: DESCRIPTION, inputSchema: SCHEMA },
-    async run(args: unknown): Promise<{ success: boolean; output: string }> {
-      const a = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : {}
-      const raw = typeof a.query === 'string' ? a.query : ''
-      if (!raw.trim()) return fail('missing_query')
+    name: 'db_read',
+    description: DESCRIPTION,
+    input: Input,
+    async run({ query }) {
       const url = process.env.SUPABASE_READONLY_URL
       // Missing URL = a brain-config gap, not an agent error — say so plainly so it's reported as a blocker.
-      if (!url) return fail('not_configured: SUPABASE_READONLY_URL is unset on this brain — if this read is essential, record it as a blocker for the operator; do not retry.')
-      const v = validateReadQuery(raw)
-      if ('error' in v) return fail(v.error)
-      try {
-        pool ??= new Bun.SQL(url, { max: 4 })
-        const rows = (await pool.unsafe(v.query)) as unknown[]
-        const body = JSON.stringify({ rowCount: rows.length, rows }, null, 2)
-        const out = body.length > MAX_OUTPUT ? `${body.slice(0, MAX_OUTPUT)}\n…[truncated ${body.length - MAX_OUTPUT} of ${body.length} chars — narrow the query or add a LIMIT]` : body
-        return { success: true, output: out }
-      } catch (e) {
-        // A permission error here means the query tried to touch something readonly_user can't SELECT (or tried to
-        // write) — surface it verbatim so the agent narrows the query rather than retrying blindly.
-        return fail(`query failed — ${e instanceof Error ? e.message : String(e)}`)
-      }
+      if (!url) throw new Error('not_configured: SUPABASE_READONLY_URL is unset on this brain — if this read is essential, record it as a blocker for the operator; do not retry.')
+      const v = validateReadQuery(query)
+      if ('error' in v) throw new Error(v.error)
+      pool ??= new Bun.SQL(url, { max: 4 })
+      // A permission error here means the query tried to touch something readonly_user can't SELECT (or tried to
+      // write) — it surfaces verbatim so the agent narrows the query rather than retrying blindly.
+      const rows = (await pool.unsafe(v.query)) as unknown[]
+      const body = JSON.stringify({ rowCount: rows.length, rows }, null, 2)
+      return body.length > MAX_OUTPUT ? `${body.slice(0, MAX_OUTPUT)}\n…[truncated ${body.length - MAX_OUTPUT} of ${body.length} chars — narrow the query or add a LIMIT]` : body
     },
   }
-}
-
-function fail(message: string): { success: false; output: string } {
-  return { success: false, output: JSON.stringify({ error: { message } }, null, 2) }
 }

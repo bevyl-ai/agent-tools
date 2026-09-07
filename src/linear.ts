@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { z } from 'zod'
 import type { DynamicTool } from './types'
 
 // The `linear_graphql` host tool: a single raw GraphQL operation per call against Linear, executed
@@ -16,28 +17,22 @@ export function isLinearMutation(query: string): boolean {
   return /^mutation\b/i.test(stripped)
 }
 
-const SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['query'],
-  properties: {
-    query: { type: 'string', description: 'GraphQL query or mutation document to execute against Linear. One operation per call.' },
-    variables: { type: 'object', description: 'Optional GraphQL variables for the document.' },
-  },
-}
+const Input = z.object({
+  query: z.string().min(1).describe('GraphQL query or mutation document to execute against Linear. One operation per call.'),
+  variables: z.record(z.string(), z.unknown()).optional().describe('Optional GraphQL variables for the document.'),
+})
 
 const DESCRIPTION =
   'Execute a single raw GraphQL query or mutation against Linear (issues, projects, comments, teams, workflow states). ' +
-  'Input: { query, variables? }. One operation per call; a top-level `errors` array means it failed. ' +
+  'One operation per call; a top-level `errors` array means it failed. ' +
   'Look up ids you need (team by key, state by name) with a read query before mutating. Issue identifiers look like "BEV-4128".'
 
-export function linearGraphqlTool(fetchFn: typeof fetch = fetch): DynamicTool {
+export function linearGraphqlTool(fetchFn: typeof fetch = fetch): DynamicTool<z.infer<typeof Input>, string> {
   return {
-    spec: { name: 'linear_graphql', description: DESCRIPTION, inputSchema: SCHEMA },
-    async run(args: unknown): Promise<{ success: boolean; output: string }> {
-      const a = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : {}
-      const query = typeof a.query === 'string' ? a.query : ''
-      if (!query.trim()) return fail('missing_query')
+    name: 'linear_graphql',
+    description: DESCRIPTION,
+    input: Input,
+    async run({ query, variables }) {
       let apiKey = process.env.LINEAR_API_KEY
       // LINEAR_TOKEN_FILE wins when set: OAuth access tokens rotate on a timer (a refresh
       // service rewrites the file), so the credential is re-read on EVERY call — a long-lived
@@ -50,24 +45,16 @@ export function linearGraphqlTool(fetchFn: typeof fetch = fetch): DynamicTool {
           /* fall back to LINEAR_API_KEY */
         }
       }
-      if (!apiKey) return fail('not_configured: neither LINEAR_TOKEN_FILE nor LINEAR_API_KEY is usable on this brain — if this call is essential, record it as a blocker for the operator; do not retry.')
-      try {
-        const res = await fetchFn('https://api.linear.app/graphql', {
-          method: 'POST',
-          headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query, variables: a.variables ?? undefined }),
-        })
-        const body = (await res.json()) as { data?: unknown; errors?: unknown[] }
-        if (Array.isArray(body.errors) && body.errors.length > 0) return fail(`linear_graphql_errors: ${JSON.stringify(body.errors).slice(0, 2000)}`)
-        const out = JSON.stringify(body.data ?? null, null, 2)
-        return { success: true, output: out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}\n…[truncated — narrow the query]` : out }
-      } catch (e) {
-        return fail(`request failed — ${e instanceof Error ? e.message : String(e)}`)
-      }
+      if (!apiKey) throw new Error('not_configured: neither LINEAR_TOKEN_FILE nor LINEAR_API_KEY is usable on this brain — if this call is essential, record it as a blocker for the operator; do not retry.')
+      const res = await fetchFn('https://api.linear.app/graphql', {
+        method: 'POST',
+        headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables }),
+      })
+      const body = (await res.json()) as { data?: unknown; errors?: unknown[] }
+      if (Array.isArray(body.errors) && body.errors.length > 0) throw new Error(`linear_graphql_errors: ${JSON.stringify(body.errors).slice(0, 2000)}`)
+      const out = JSON.stringify(body.data ?? null, null, 2)
+      return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}\n…[truncated — narrow the query]` : out
     },
   }
-}
-
-function fail(message: string): { success: false; output: string } {
-  return { success: false, output: JSON.stringify({ error: { message } }, null, 2) }
 }
