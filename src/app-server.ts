@@ -156,7 +156,7 @@ export class AppServerSession {
         approvalPolicy: this.codex.approvalPolicy,
         sandbox: this.codex.threadSandbox,
         cwd: workspace,
-        dynamicTools: [...this.tools.values()].map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.input) })),
+        dynamicTools: [...this.tools.values()].map((t) => ({ name: t.name, description: t.description, inputSchema: z.toJSONSchema(t.input, { io: "input" }) })),
       },
       this.codex.initTimeoutMs, // thread setup on a cold/loaded VM exceeds the steady-state read timeout
     )
