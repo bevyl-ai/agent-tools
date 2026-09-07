@@ -30,6 +30,8 @@ export interface SessionHooks {
   // turn can't `echo $SLACK_BOT_TOKEN`. Applied before beforeSpawn's additions are merged. Omit → inherit process.env
   // unchanged (a session that spawns only on remote VMs, like bunion's, never reaches this).
   scrubEnv?(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv
+  // Called when a turn fails (rejection, turn timeout, or stall) before the error is rethrown — e.g. rotate gateways.
+  onTurnError?(error: unknown): void
 }
 
 // Minimal client for the Codex app-server JSON-RPC stream over stdio (newline-delimited JSON, NOT Content-Length).
@@ -202,7 +204,29 @@ export class AppServerSession {
       if (t) clearTimeout(t.timer)
       throw e
     }
-    await turnDone
+    // Stall watch: codex.stallTimeoutMs > 0 kills a turn with no runtime activity for that long (a hung
+    // gateway request never times out on its own). Tool calls in flight count as activity.
+    const stalled = new Promise<never>((_, reject) => {
+      const ms = this.codex.stallTimeoutMs
+      if (!(ms > 0)) return
+      const poll = Math.max(10, Math.min(1000, ms / 5))
+      const check = () => {
+        if (!this.turn) return
+        if (this.msSinceLastActivity() >= ms) {
+          this.stop()
+          reject(new CategorizedError('stall', `no runtime activity for ${ms}ms`))
+          return
+        }
+        setTimeout(check, poll)
+      }
+      setTimeout(check, poll)
+    })
+    try {
+      await Promise.race([turnDone, stalled])
+    } catch (e) {
+      this.hooks?.onTurnError?.(e)
+      throw e
+    }
   }
 
   stop(): void {
