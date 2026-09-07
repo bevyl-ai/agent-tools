@@ -38,6 +38,26 @@ export interface SessionHooks {
 // Minimal client for the Codex app-server JSON-RPC stream over stdio (newline-delimited JSON, NOT Content-Length).
 // One subprocess + one thread per issue; turns run on the same thread. Server→client requests (tool calls,
 // approvals, user-input) are answered inline so an unattended turn never stalls. Faithful to Symphony's AppServer.
+// Every CodexConfig field a host leaves unset. command is derived from model/effort unless the host sets it.
+export const CODEX_DEFAULTS: CodexConfig = {
+  command: 'codex app-server',
+  approvalPolicy: 'never',
+  threadSandbox: 'workspace-write',
+  turnSandboxPolicy: null,
+  turnTimeoutMs: 60 * 60 * 1000,
+  readTimeoutMs: 30_000,
+  initTimeoutMs: 60_000,
+  stallTimeoutMs: 5 * 60 * 1000,
+}
+
+function codexCommand({ command, model, effort }: Partial<CodexConfig>): string {
+  if (command) return command
+  const flags = Object.entries({ model, model_reasoning_effort: effort })
+    .filter(([, v]) => v)
+    .map(([k, v]) => `-c ${k}=${JSON.stringify(v)}`)
+  return ['codex', ...flags, 'app-server'].join(' ')
+}
+
 export class AppServerSession {
   private codex: CodexConfig
   private tools: Map<string, DynamicTool>
@@ -54,8 +74,8 @@ export class AppServerSession {
   private lastActivityAt = 0
   private pendingToolCalls = 0
 
-  constructor(codex: CodexConfig, tools: DynamicTool[], onEvent: (e: AgentEvent) => void = () => {}, hooks?: SessionHooks) {
-    this.codex = codex
+  constructor(codex: Partial<CodexConfig>, tools: DynamicTool[], onEvent: (e: AgentEvent) => void = () => {}, hooks?: SessionHooks) {
+    this.codex = { ...CODEX_DEFAULTS, ...codex, command: codexCommand(codex) }
     this.tools = new Map(tools.map((t) => [t.name, t]))
     this.onEvent = onEvent
     this.hooks = hooks

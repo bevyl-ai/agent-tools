@@ -50,7 +50,9 @@ export interface AgentEvent {
 
 // The codex-app-server settings a session needs (command, sandbox policies, timeouts).
 export interface CodexConfig {
-  command: string
+  command: string // default: `codex app-server`, with `-c model=…` / `-c model_reasoning_effort=…` when model/effort are set
+  model?: string // pin a model for this session (codex's own default otherwise)
+  effort?: string // model_reasoning_effort for this session
   approvalPolicy: string // "never" → auto-approve; passed through to the app-server
   threadSandbox: string // thread/start.params.sandbox (a STRING)
   turnSandboxPolicy: Record<string, unknown> | null // turn/start.params.sandboxPolicy (an OBJECT)
