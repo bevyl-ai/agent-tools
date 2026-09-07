@@ -178,6 +178,17 @@ export class AppServerSession {
   // Send one turn and resolve when it terminates (turn/completed). Rejects on turn/failed|cancelled, timeout, or
   // a dead subprocess. `sandbox` overrides the turn's sandbox policy (e.g. read-only for an operator chat turn).
   // One fresh thread, one turn, then stop: the whole life of a session that never continues.
+  // One fresh thread, turn after turn while `next` supplies a prompt, then stop.
+  async runTurns(workspace: string, title: string, next: () => string | null): Promise<void> {
+    await this.start(workspace)
+    try {
+      const threadId = await this.startThread(workspace)
+      for (let prompt = next(); prompt !== null; prompt = next()) await this.runTurn(threadId, workspace, prompt, title)
+    } finally {
+      this.stop()
+    }
+  }
+
   async runOnce(workspace: string, prompt: string, title: string): Promise<void> {
     await this.start(workspace)
     try {
