@@ -71,3 +71,8 @@ export interface DynamicTool<I = unknown, O = unknown> {
   input: z.ZodType<I>
   run(input: I): Promise<O>
 }
+
+// Build a DynamicTool with I and O inferred from the schema and the run function.
+export function tool<I, O>(name: string, description: string, input: z.ZodType<I>, run: (input: I) => Promise<O>): DynamicTool<I, O> {
+  return { name, description, input, run }
+}
