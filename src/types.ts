@@ -69,5 +69,3 @@ export interface DynamicTool<I = unknown, O = unknown> {
   input: z.ZodType<I>
   run(input: I): Promise<O>
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type AnyTool = DynamicTool<any, any>
