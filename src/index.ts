@@ -1,6 +1,3 @@
-// @bevyl-ai/agent-tools — codex threads on the Codex SDK, tools served in-process over MCP, and the host plumbing.
-// Domain tools (a project's tracker access, PR build gates) stay in the consuming project; only what is genuinely
-// reusable lives here.
 export { isQuotaWall, isRateLimited, maybeRotateGateway, type RotateResult } from './rotate'
 export { scrubSecrets, SECRET_ENV } from './scrub-env'
 export { codexThread, type ThreadConfig } from './session'

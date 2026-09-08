@@ -8,8 +8,6 @@ export const text = (s: string): { content: { type: 'text'; text: string }[] } =
 const routes = new Map<string, WebStandardStreamableHTTPServerTransport>()
 let host: ReturnType<typeof Bun.serve> | null = null
 
-// Every tool a thread gets is served in-process, over streamable HTTP on loopback, under a route only that
-// thread knows. The closure a tool captures IS its context; nothing crosses a process boundary.
 export async function serveTools(register: Tools): Promise<{ url: string; close: () => void }> {
   host ??= Bun.serve({
     hostname: '127.0.0.1',

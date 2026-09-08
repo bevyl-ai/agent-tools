@@ -3,14 +3,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 import { text } from './mcp'
 
-// The `github_api` host tool: one GitHub REST call per invocation, executed by the brain with its
-// own token (GITHUB_TOKEN lives ONLY on the brain). The agent names method + path; the host is a
-// thin, auditable transport — same posture as linear_graphql/db_read.
-
 const MAX_OUTPUT = 100_000
 
-// Pure validators so hosts can policy-gate and reject junk fast (unit-testable, not the security
-// boundary — the token's scopes are).
 export function isGithubWrite(method: string | undefined): boolean {
   return !['GET', 'HEAD', undefined, ''].includes(method?.toUpperCase?.() ?? undefined)
 }

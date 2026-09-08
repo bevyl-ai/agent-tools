@@ -1,5 +1,3 @@
-// Host-runtime primitives for an agent looping on a box: synchronous subprocess exec (stdin-fed to
-// dodge ARG_MAX), env-file parsing, a pid-based single-flight lock, and clone-or-reset checkout refresh.
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -72,7 +70,7 @@ export function acquireLock(path: string, opts: { staleMs?: number } = {}): bool
         return true
       }
     } catch {
-      /* lock vanished or became unreadable; let the next tick retry */
+
     }
     return false
   }
@@ -82,7 +80,7 @@ export function releaseLock(path: string): void {
   try {
     if (Number(readFileSync(path, 'utf8').trim()) === process.pid) rmSync(path, { force: true })
   } catch {
-    /* best-effort */
+
   }
 }
 

@@ -3,10 +3,6 @@ import { z } from 'zod'
 
 import { text } from './mcp'
 
-// A Slack Web API passthrough: one method call per invocation, executed by the host with a token
-// the agent never sees. Same posture as github_api/linear_graphql: the agent names the method and
-// its documented arguments, the host is a thin transport. Hosts register one per credential.
-
 const MAX_OUTPUT = 100_000
 
 const Input = z.object({

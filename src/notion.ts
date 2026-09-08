@@ -3,15 +3,11 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
 import { text } from './mcp'
 
-// The `notion_api` host tool: one Notion REST call per invocation, executed by the brain with its
-// own integration token (NOTION_API_KEY lives ONLY on the brain). Same thin-transport posture as
-// github_api/linear_graphql. Only pages/databases shared with the integration are visible.
-
 const MAX_OUTPUT = 100_000
 const NOTION_VERSION = '2022-06-28'
 
 export function isNotionWrite(method: string | undefined): boolean {
-  // Notion's search + database queries are POSTs that read — treat those paths as reads.
+
   return !['GET', 'HEAD', undefined, ''].includes(method?.toUpperCase?.() ?? undefined)
 }
 

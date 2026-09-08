@@ -8,8 +8,6 @@ export interface ThreadConfig extends ThreadOptions {
   env?: Record<string, string>
 }
 
-// A codex thread with the defaults every agent here wants: auto-approve, read-only sandbox, no network, secrets
-// scrubbed from the child env. Tools, if any, are the in-process MCP host. close() frees the tool route.
 export async function codexThread(opts: ThreadConfig): Promise<{ thread: Thread; close: () => void }> {
   const { tools, env, ...thread } = opts
   const served = tools ? await serveTools(tools) : null

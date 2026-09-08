@@ -2,29 +2,11 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-// Codex gateway rotation for a shared pool of interchangeable ChatGPT accounts (e.g. exe.dev `llm`
-// integrations). Which account codex uses is just the gateway HOSTNAME inside `base_url` in
-// ~/.codex/config.toml, and codex re-reads that file on every spawn — so rotation is a file edit, no
-// restarts. The mechanism is deliberately dumb: no probing (the caller's real failure is the signal),
-// no state beyond the config file and a cooldown stamp beside it. A dead account fails fast and the
-// ring advances again, so the pool converges on whichever account has quota.
-//
-// Policy lives in the environment so every consumer shares it by configuration, not code:
-//   CODEX_GATEWAY_POOL         ordered comma-separated gateway hostnames; unset/empty = rotation off
-//   CODEX_ROTATE_COOLDOWN_MIN  minimum minutes between rotations (default 10) — a fully-drained pool
-//                              cycles calmly, one step per failure, instead of thrashing
-
-// The quota-wall signatures seen from codex/the exe-llm gateway. Deliberately tight: transient network
-// errors and model refusals must NOT rotate, or every hiccup walks the ring.
 const QUOTA_WALL =
   /usage limit|usage_limit_reached|usageLimitExceeded|402 Payment Required|LLM credits exhausted|ChatGPT account unavailable/i
 
 export const isQuotaWall = (text: string): boolean => QUOTA_WALL.test(text)
 
-// The LOOSE sibling: "this run is rate/usage-limited, stop hammering" — matches transient throttles
-// (429, too-many-requests) that must NOT rotate the gateway ring. Two regexes on purpose: isRateLimited
-// decides when a caller backs off; isQuotaWall decides when the ACCOUNT is drained enough to rotate.
-// Do not merge them — a 429 that walked the ring would thrash accounts on every burst.
 export const isRateLimited = (out: string): boolean =>
   /payment required|credits?\s+exhausted|insufficient\s+(?:credit|quota|balance)|usage limit|rate.?limit|too many requests|\b(?:402|429)\b|quota/i.test(out)
 
@@ -40,9 +22,6 @@ const read = (path: string): string | null => {
 
 const defaultConfigPath = (): string => join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml')
 
-/** Advance the codex gateway to the next pool entry, iff `reason` is a quota wall and the cooldown has
- *  passed. Never touches hosts outside the pool, so other providers in config.toml are safe. `pool` and
- *  `cooldownMs` override the env for consumers that read their config from a file (stupify's config.env). */
 export function maybeRotateGateway(opts: { reason: string; configPath?: string; now?: number; pool?: string[]; cooldownMs?: number }): RotateResult {
   const pool = opts.pool ?? (process.env.CODEX_GATEWAY_POOL ?? '').split(',').map((h) => h.trim()).filter(Boolean)
   if (pool.length < 2) return { rotated: false, why: pool.length === 0 ? 'CODEX_GATEWAY_POOL unset — rotation off' : 'pool has a single entry' }
