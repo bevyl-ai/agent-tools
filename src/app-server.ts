@@ -179,7 +179,7 @@ export class AppServerSession {
   // a dead subprocess. `sandbox` overrides the turn's sandbox policy (e.g. read-only for an operator chat turn).
   // One fresh thread, one turn, then stop: the whole life of a session that never continues.
   // One fresh thread, turn after turn while `next` supplies a prompt, then stop.
-  async runTurns(workspace: string, title: string, next: () => string | null): Promise<void> {
+  async runTurns(next: () => string | null, workspace = this.codex.cwd ?? '', title = this.codex.title ?? ''): Promise<void> {
     await this.start(workspace)
     try {
       const threadId = await this.startThread(workspace)
@@ -189,7 +189,7 @@ export class AppServerSession {
     }
   }
 
-  async runOnce(workspace: string, prompt: string, title: string): Promise<void> {
+  async runOnce(prompt: string, workspace = this.codex.cwd ?? '', title = this.codex.title ?? ''): Promise<void> {
     await this.start(workspace)
     try {
       await this.runTurn(await this.startThread(workspace), workspace, prompt, title)

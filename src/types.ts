@@ -50,6 +50,8 @@ export interface AgentEvent {
 
 // The codex-app-server settings a session needs (command, sandbox policies, timeouts).
 export interface CodexConfig {
+  cwd?: string | undefined // the workspace runOnce and runTurns use; start/runTurn still take one explicitly
+  title?: string | undefined // the turn title runOnce and runTurns use
   command: string // default: `codex app-server`, with `-c model=…` / `-c model_reasoning_effort=…` when model/effort are set
   model?: string | undefined // pin a model for this session (codex's own default otherwise)
   effort?: string | undefined // model_reasoning_effort for this session
