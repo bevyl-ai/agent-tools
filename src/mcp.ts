@@ -8,12 +8,17 @@ export const text = (s: string): { content: { type: 'text'; text: string }[] } =
 const routes = new Map<string, WebStandardStreamableHTTPServerTransport>()
 let host: ReturnType<typeof Bun.serve> | null = null
 
+const unref = (server: ReturnType<typeof Bun.serve>): ReturnType<typeof Bun.serve> => {
+  server.unref()
+  return server
+}
+
 export async function serveTools(register: Tools): Promise<{ url: string; close: () => void }> {
-  host ??= Bun.serve({
+  host ??= unref(Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: (req) => routes.get(new URL(req.url).pathname)?.handleRequest(req) ?? new Response('not found', { status: 404 }),
-  })
+  }))
   const path = `/${crypto.randomUUID()}`
   const server = new McpServer({ name: 'host', version: '0' })
   register(server)
