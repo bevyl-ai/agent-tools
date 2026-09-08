@@ -1,8 +1,8 @@
 # @bevyl-ai/agent-tools
 
 Codex threads on the [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk), tools served in-process over MCP, and the host plumbing for [codex](https://github.com/openai/codex) agents.
-Extracted from the `@bevyl/agent-kit` packages vendored in [bunion](https://github.com/bevyl-ai/bunion) and
-[earshot](https://github.com/Octember/earshot) so the two copies stop drifting. Codex/exe.dev only — never the Claude API.
+Shared by
+[earshot](https://github.com/Octember/earshot) and [stupify](https://github.com/Octember/stupify). Codex/exe.dev only — never the Claude API.
 
 ## What's in it
 
@@ -16,16 +16,7 @@ Extracted from the `@bevyl/agent-kit` packages vendored in [bunion](https://gith
   holds the tokens and the agent names allowlisted endpoints. Each is a registrar: `githubApiTool()(server)`.
 - Surfaces: `surface.ts` (the `SurfaceAdapter` contract — the portability boundary between a chat surface
   and everything above it) and `slack-adapter.ts` (the Socket Mode reference implementation).
-- GitHub App identity: `github-app.ts` (App JWT → cached installation token) and `github-session-hooks.ts`
-  (a `SessionHooks` that injects the bot token into codex sessions — child env locally, a refreshed
-  token file over ssh for remote workers).
-- `ssh.ts` — hardened ssh/scp helpers for driving remote worker VMs (`sshExec`, `execAsync`, `scpInto`,
-  `remoteHome`, `shq`).
-- `exe.ts` — the exe.dev control-plane: `exe()` (the `ssh exe.dev` CLI), integration discovery, VM naming,
-  first-boot setup scripts, cron installation, repo/host validation.
-- `host.ts` — runtime primitives for an agent looping on a box: `exec` (stdin-fed subprocess), env-file
-  parsing, a pid-based single-flight lock, clone-or-reset checkout refresh.
-- `codex-config.ts` — one writer for the keyless exe-llm gateway block in `~/.codex/config.toml`.
+- `host.ts` — `exec` (stdin-fed subprocess), env-file parsing, a pid-based single-flight lock, clone-or-reset checkout refresh.
 - `scrub-env.ts` — the default `scrubEnv`: strip secret-looking vars from what a codex child inherits.
 
 Source-only TypeScript on `@openai/codex-sdk` and `@modelcontextprotocol/sdk`, Bun ≥ 1.3.

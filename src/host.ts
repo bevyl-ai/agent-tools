@@ -49,7 +49,7 @@ export function parseEnvFile(path: string): Record<string, string> {
   return out
 }
 
-export function pidAlive(pid: number): boolean {
+function pidAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false
   try {
     process.kill(pid, 0)
@@ -100,6 +100,3 @@ export function refreshCheckout(opts: { repoDir: string; slug: string; defaultBr
   )
 }
 
-export function have(cmd: string): boolean {
-  return Bun.which(cmd) !== null
-}
