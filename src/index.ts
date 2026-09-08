@@ -6,7 +6,7 @@ export { isQuotaWall, isRateLimited, maybeRotateGateway, sshGatewayFs, type Gate
 export { execAsync, remoteHome, scpInto, shq, sshExec } from './ssh'
 export { scrubSecrets, SECRET_ENV } from './scrub-env'
 export { writeCodexGatewayConfig, type CodexGatewayOptions } from './codex-config'
-export { AppServerSession, CODEX_DEFAULTS, type SessionHooks } from './app-server'
+export { AppServerSession, CODEX_DEFAULTS, untilDone, type SessionHooks } from './app-server'
 export { opsReadTool, resolveOpsRequest } from './ops-read'
 export { dbReadTool, validateReadQuery } from './db-read'
 export { linearGraphqlTool, isLinearMutation } from './linear'

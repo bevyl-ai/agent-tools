@@ -58,6 +58,27 @@ function codexCommand({ command, model, effort }: Partial<CodexConfig>): string 
   return ['codex', ...flags, 'app-server'].join(' ')
 }
 
+// The loop every coding agent converges on (Claude Code, opencode, goose, OpenHands, bunion): a turn is the model's
+// own tool loop until it emits a final message; a turn that ends WITHOUT the terminal signal gets a continuation
+// prompt on the same thread, up to a cap. `done` is that signal — a tool the model called, never its prose (the
+// caller flips it from the tool's run). The cap is a guardrail, not the mechanism: a run that hits it ends with
+// `done()` still false and the caller decides what that means. Feed the result to runTurns.
+export function untilDone(opts: {
+  prompt: string
+  done: () => boolean
+  maxTurns?: number // default 10
+  continuation?: (turn: number, maxTurns: number) => string
+}): () => string | null {
+  const maxTurns = opts.maxTurns ?? 10
+  const continuation = opts.continuation ?? ((turn, max) => `Continuation, turn ${turn} of ${max}, same thread. Resume from where you left off; don't restate or redo finished work.`)
+  let turn = 0
+  return () => {
+    if (opts.done() || turn >= maxTurns) return null
+    turn++
+    return turn === 1 ? opts.prompt : continuation(turn, maxTurns)
+  }
+}
+
 export class AppServerSession {
   private codex: CodexConfig
   private tools: Map<string, DynamicTool>

@@ -8,6 +8,8 @@ Extracted from the `@bevyl/agent-kit` packages vendored in [bunion](https://gith
 
 - `AppServerSession` (`app-server.ts`) — minimal client for the codex app-server JSON-RPC stream over stdio:
   turn lifecycle, dynamic tool dispatch, token/rate-limit accounting, failure categorization.
+  `untilDone({ prompt, done, maxTurns, continuation })` builds the `next` for `runTurns`: first the prompt, then a
+  continuation prompt on the same thread until `done()` (a terminal tool the model called) or the cap.
 - `rotate.ts` — codex gateway rotation for shared ChatGPT-account pools: when a turn dies on a usage
   limit, advance `~/.codex/config.toml` to the next gateway in `CODEX_GATEWAY_POOL`. See below.
 - Host tools: `db-read.ts` (read-only SQLite), `ops-read.ts` (allowlisted read-only observability over
