@@ -1,7 +1,7 @@
 export { isQuotaWall, isRateLimited, maybeRotateGateway, type RotateResult } from './rotate'
 export { scrubSecrets, SECRET_ENV } from './scrub-env'
 export { codexThread, type ThreadConfig } from './session'
-export { serveTools, text, type Tools } from './mcp'
+export { serveTools, text, tool, type Tools } from './mcp'
 export { opsReadTool, resolveOpsRequest } from './ops-read'
 export { dbReadTool, validateReadQuery } from './db-read'
 export { linearGraphqlTool, isLinearMutation } from './linear'
