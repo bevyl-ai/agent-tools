@@ -1,5 +1,7 @@
 import { z } from 'zod'
-import type { DynamicTool } from './types'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+
+import { text } from './mcp'
 
 // The `ops_read` host tool: READ-ONLY observability over Trigger.dev, Vercel, Datadog, and Sentry. The host's security
 // posture deliberately keeps high-privilege keys off worker VMs — so, exactly like linear_graphql, the
@@ -144,26 +146,22 @@ const Input = z.object({
   body: z.record(z.string(), z.unknown()).optional().describe('(POST only) JSON request body, e.g. { filter: { query, from, to } }.'),
 })
 
-export function opsReadTool(): DynamicTool<z.infer<typeof Input>, string> {
-  return {
-    name: 'ops_read',
-    description: describe(),
-    input: Input,
-    async run({ service, path, method, body }) {
-      const svc = SERVICES[service]!
-      const headers = svc.auth()
-      // Missing token = a brain-config gap, not an agent error: say so plainly so the agent reports it as a blocker
-      // instead of retrying or inventing credentials.
-      if (!headers) throw new Error(`not_configured: ${service} is not configured on this brain (${svc.envHint} unset) — if this read is essential, record it as a blocker for the operator; do not retry.`)
-      const req = resolveOpsRequest(service, method, path.trim())
-      if ('error' in req) throw new Error(req.error)
-      const payload = method === 'POST' && body ? JSON.stringify(body) : undefined
-      // 30s network timeout, same as linear.ts — a hung upstream must never wedge the agent's turn.
-      const res = await fetch(req.url, { method, headers: payload ? { ...headers, 'content-type': 'application/json' } : headers, ...(payload ? { body: payload } : {}), signal: AbortSignal.timeout(30_000) })
-      const text = await res.text()
-      const out = text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n…[truncated ${text.length - MAX_OUTPUT} of ${text.length} chars — narrow the query]` : text
-      if (!res.ok) throw new Error(`HTTP ${res.status}\n${out}`)
-      return `HTTP ${res.status}\n${out}`
-    },
+export function opsReadTool(): (server: McpServer) => void {
+  const run = async ({ service, path, method, body }: z.infer<typeof Input>): Promise<string> => {
+    const svc = SERVICES[service]!
+    const headers = svc.auth()
+    // Missing token = a brain-config gap, not an agent error: say so plainly so the agent reports it as a blocker
+    // instead of retrying or inventing credentials.
+    if (!headers) throw new Error(`not_configured: ${service} is not configured on this brain (${svc.envHint} unset) — if this read is essential, record it as a blocker for the operator; do not retry.`)
+    const req = resolveOpsRequest(service, method, path.trim())
+    if ('error' in req) throw new Error(req.error)
+    const payload = method === 'POST' && body ? JSON.stringify(body) : undefined
+    // 30s network timeout, same as linear.ts — a hung upstream must never wedge the agent's turn.
+    const res = await fetch(req.url, { method, headers: payload ? { ...headers, 'content-type': 'application/json' } : headers, ...(payload ? { body: payload } : {}), signal: AbortSignal.timeout(30_000) })
+    const text = await res.text()
+    const out = text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n…[truncated ${text.length - MAX_OUTPUT} of ${text.length} chars — narrow the query]` : text
+    if (!res.ok) throw new Error(`HTTP ${res.status}\n${out}`)
+    return `HTTP ${res.status}\n${out}`
   }
+  return (server) => server.registerTool('ops_read', { description: describe(), inputSchema: Input.shape }, async (args) => text(await run(args)))
 }

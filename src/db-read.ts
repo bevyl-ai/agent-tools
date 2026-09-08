@@ -1,5 +1,7 @@
 import { z } from 'zod'
-import type { DynamicTool } from './types'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+
+import { text } from './mcp'
 
 // The `db_read` host tool: READ-ONLY SQL over the production Postgres, executed by the brain as a dedicated
 // SELECT-only role (`readonly_user` — SELECT grants on the public schema, no write privileges, a role-level
@@ -39,23 +41,19 @@ const DESCRIPTION =
   'One read statement only (SELECT / WITH / EXPLAIN / SHOW) — writes are impossible (the role has no write grants) and stacked statements are refused. ' +
   'Rows come back as JSON (capped). Use it to inspect prod data the API tools can\'t reach — eval scores, metering_events rows, a project\'s live state — instead of dead-ending on "can\'t read the DB".'
 
-export function dbReadTool(): DynamicTool<z.infer<typeof Input>, string> {
-  return {
-    name: 'db_read',
-    description: DESCRIPTION,
-    input: Input,
-    async run({ query }) {
-      const url = process.env.SUPABASE_READONLY_URL
-      // Missing URL = a brain-config gap, not an agent error — say so plainly so it's reported as a blocker.
-      if (!url) throw new Error('not_configured: SUPABASE_READONLY_URL is unset on this brain — if this read is essential, record it as a blocker for the operator; do not retry.')
-      const v = validateReadQuery(query)
-      if ('error' in v) throw new Error(v.error)
-      pool ??= new Bun.SQL(url, { max: 4 })
-      // A permission error here means the query tried to touch something readonly_user can't SELECT (or tried to
-      // write) — it surfaces verbatim so the agent narrows the query rather than retrying blindly.
-      const rows = (await pool.unsafe(v.query)) as unknown[]
-      const body = JSON.stringify({ rowCount: rows.length, rows }, null, 2)
-      return body.length > MAX_OUTPUT ? `${body.slice(0, MAX_OUTPUT)}\n…[truncated ${body.length - MAX_OUTPUT} of ${body.length} chars — narrow the query or add a LIMIT]` : body
-    },
+export function dbReadTool(): (server: McpServer) => void {
+  const run = async ({ query }: z.infer<typeof Input>): Promise<string> => {
+    const url = process.env.SUPABASE_READONLY_URL
+    // Missing URL = a brain-config gap, not an agent error — say so plainly so it's reported as a blocker.
+    if (!url) throw new Error('not_configured: SUPABASE_READONLY_URL is unset on this brain — if this read is essential, record it as a blocker for the operator; do not retry.')
+    const v = validateReadQuery(query)
+    if ('error' in v) throw new Error(v.error)
+    pool ??= new Bun.SQL(url, { max: 4 })
+    // A permission error here means the query tried to touch something readonly_user can't SELECT (or tried to
+    // write) — it surfaces verbatim so the agent narrows the query rather than retrying blindly.
+    const rows = (await pool.unsafe(v.query)) as unknown[]
+    const body = JSON.stringify({ rowCount: rows.length, rows }, null, 2)
+    return body.length > MAX_OUTPUT ? `${body.slice(0, MAX_OUTPUT)}\n…[truncated ${body.length - MAX_OUTPUT} of ${body.length} chars — narrow the query or add a LIMIT]` : body
   }
+  return (server) => server.registerTool('db_read', { description: DESCRIPTION, inputSchema: Input.shape }, async (args) => text(await run(args)))
 }

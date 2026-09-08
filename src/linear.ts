@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
-import type { DynamicTool } from './types'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+
+import { text } from './mcp'
 
 // The `linear_graphql` host tool: a single raw GraphQL operation per call against Linear, executed
 // by the brain with its own API key (LINEAR_API_KEY lives ONLY on the brain — the agent names an
@@ -27,34 +29,30 @@ const DESCRIPTION =
   'One operation per call; a top-level `errors` array means it failed. ' +
   'Look up ids you need (team by key, state by name) with a read query before mutating. Issue identifiers look like "BEV-4128".'
 
-export function linearGraphqlTool(fetchFn: typeof fetch = fetch): DynamicTool<z.infer<typeof Input>, string> {
-  return {
-    name: 'linear_graphql',
-    description: DESCRIPTION,
-    input: Input,
-    async run({ query, variables }) {
-      let apiKey = process.env.LINEAR_API_KEY
-      // LINEAR_TOKEN_FILE wins when set: OAuth access tokens rotate on a timer (a refresh
-      // service rewrites the file), so the credential is re-read on EVERY call — a long-lived
-      // process must never pin a token that expired under it. Unreadable file falls back to env.
-      const tokenFile = process.env.LINEAR_TOKEN_FILE
-      if (tokenFile) {
-        try {
-          apiKey = (await readFile(tokenFile, 'utf8')).trim()
-        } catch {
-          /* fall back to LINEAR_API_KEY */
-        }
+export function linearGraphqlTool(fetchFn: typeof fetch = fetch): (server: McpServer) => void {
+  const run = async ({ query, variables }: z.infer<typeof Input>): Promise<string> => {
+    let apiKey = process.env.LINEAR_API_KEY
+    // LINEAR_TOKEN_FILE wins when set: OAuth access tokens rotate on a timer (a refresh
+    // service rewrites the file), so the credential is re-read on EVERY call — a long-lived
+    // process must never pin a token that expired under it. Unreadable file falls back to env.
+    const tokenFile = process.env.LINEAR_TOKEN_FILE
+    if (tokenFile) {
+      try {
+        apiKey = (await readFile(tokenFile, 'utf8')).trim()
+      } catch {
+        /* fall back to LINEAR_API_KEY */
       }
-      if (!apiKey) throw new Error('not_configured: neither LINEAR_TOKEN_FILE nor LINEAR_API_KEY is usable on this brain — if this call is essential, record it as a blocker for the operator; do not retry.')
-      const res = await fetchFn('https://api.linear.app/graphql', {
-        method: 'POST',
-        headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, variables }),
-      })
-      const body = (await res.json()) as { data?: unknown; errors?: unknown[] }
-      if (Array.isArray(body.errors) && body.errors.length > 0) throw new Error(`linear_graphql_errors: ${JSON.stringify(body.errors).slice(0, 2000)}`)
-      const out = JSON.stringify(body.data ?? null, null, 2)
-      return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}\n…[truncated — narrow the query]` : out
-    },
+    }
+    if (!apiKey) throw new Error('not_configured: neither LINEAR_TOKEN_FILE nor LINEAR_API_KEY is usable on this brain — if this call is essential, record it as a blocker for the operator; do not retry.')
+    const res = await fetchFn('https://api.linear.app/graphql', {
+      method: 'POST',
+      headers: { Authorization: apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, variables }),
+    })
+    const body = (await res.json()) as { data?: unknown; errors?: unknown[] }
+    if (Array.isArray(body.errors) && body.errors.length > 0) throw new Error(`linear_graphql_errors: ${JSON.stringify(body.errors).slice(0, 2000)}`)
+    const out = JSON.stringify(body.data ?? null, null, 2)
+    return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}\n…[truncated — narrow the query]` : out
   }
+  return (server) => server.registerTool('linear_graphql', { description: DESCRIPTION, inputSchema: Input.shape }, async (args) => text(await run(args)))
 }

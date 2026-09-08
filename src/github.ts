@@ -1,5 +1,7 @@
 import { z } from 'zod'
-import type { DynamicTool } from './types'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+
+import { text } from './mcp'
 
 // The `github_api` host tool: one GitHub REST call per invocation, executed by the brain with its
 // own token (GITHUB_TOKEN lives ONLY on the brain). The agent names method + path; the host is a
@@ -31,30 +33,26 @@ const DESCRIPTION =
   'Examples: GET /repos/{owner}/{repo}/pulls?state=open, GET /search/issues?q=repo:owner/name+is:open+export, GET /repos/{owner}/{repo}/commits. ' +
   'Responses are JSON, truncated when huge — prefer specific endpoints and per_page over broad dumps.'
 
-export function githubApiTool(fetchFn: typeof fetch = fetch): DynamicTool<z.infer<typeof Input>, string> {
-  return {
-    name: 'github_api',
-    description: DESCRIPTION,
-    input: Input,
-    async run({ method, path, body }) {
-      const v = validateGithubPath(path)
-      if ('error' in v) throw new Error(v.error)
-      const token = process.env.GITHUB_TOKEN
-      if (!token) throw new Error('not_configured: GITHUB_TOKEN is unset on this brain — if this call is essential, record it as a blocker for the operator; do not retry.')
-      const res = await fetchFn(`https://api.github.com${v.path}`, {
-        method: (method || 'GET').toUpperCase(),
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-          'User-Agent': 'bevyl-agent-kit',
-          ...(body ? { 'Content-Type': 'application/json' } : {}),
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      })
-      const text = await res.text()
-      if (!res.ok) throw new Error(`github ${res.status}: ${text.slice(0, 2000)}`)
-      return text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n…[truncated — narrow the request]` : text
-    },
+export function githubApiTool(fetchFn: typeof fetch = fetch): (server: McpServer) => void {
+  const run = async ({ method, path, body }: z.infer<typeof Input>): Promise<string> => {
+    const v = validateGithubPath(path)
+    if ('error' in v) throw new Error(v.error)
+    const token = process.env.GITHUB_TOKEN
+    if (!token) throw new Error('not_configured: GITHUB_TOKEN is unset on this brain — if this call is essential, record it as a blocker for the operator; do not retry.')
+    const res = await fetchFn(`https://api.github.com${v.path}`, {
+      method: (method || 'GET').toUpperCase(),
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'bevyl-agent-kit',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    })
+    const text = await res.text()
+    if (!res.ok) throw new Error(`github ${res.status}: ${text.slice(0, 2000)}`)
+    return text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n…[truncated — narrow the request]` : text
   }
+  return (server) => server.registerTool('github_api', { description: DESCRIPTION, inputSchema: Input.shape }, async (args) => text(await run(args)))
 }

@@ -1,19 +1,19 @@
 # @bevyl-ai/agent-tools
 
-Shared runtime contract + generic host tools for [codex](https://github.com/openai/codex) app-server agents.
+Codex threads on the [Codex SDK](https://www.npmjs.com/package/@openai/codex-sdk), tools served in-process over MCP, and the host plumbing for [codex](https://github.com/openai/codex) agents.
 Extracted from the `@bevyl/agent-kit` packages vendored in [bunion](https://github.com/bevyl-ai/bunion) and
 [earshot](https://github.com/Octember/earshot) so the two copies stop drifting. Codex/exe.dev only — never the Claude API.
 
 ## What's in it
 
-- `AppServerSession` (`app-server.ts`) — minimal client for the codex app-server JSON-RPC stream over stdio:
-  turn lifecycle, dynamic tool dispatch, token/rate-limit accounting, failure categorization.
+- `session.ts` — `codexThread({ tools?, model, effort, workingDirectory, … })` starts an SDK thread with the defaults every agent here wants (auto-approve, read-only sandbox, no network, secrets scrubbed from the child env); `runTurn(thread, input, { outputSchema?, turnMs, stallMs, onEvent })` is one turn with turn and stall aborts, returning the final text and usage.
+- `mcp.ts` — the in-process MCP host. `tools` is `(server: McpServer) => void`: register with the MCP SDK's `registerTool` and zod shapes, closures are the context, and the thread reaches them over streamable HTTP on loopback. `text()` wraps a string result.
 - `rotate.ts` — codex gateway rotation for shared ChatGPT-account pools: when a turn dies on a usage
   limit, advance `~/.codex/config.toml` to the next gateway in `CODEX_GATEWAY_POOL`. See below.
 - Host tools: `db-read.ts` (read-only SQLite), `ops-read.ts` (allowlisted read-only observability over
   Trigger.dev / Vercel / Datadog / Sentry / Slack).
-- Integration helpers: `github.ts`, `linear.ts`, `notion.ts` — capability-style API tools where the host
-  holds the tokens and the agent names allowlisted endpoints.
+- Integration helpers: `github.ts`, `linear.ts`, `notion.ts`, `slack.ts` — capability-style API tools where the host
+  holds the tokens and the agent names allowlisted endpoints. Each is a registrar: `githubApiTool()(server)`.
 - Surfaces: `surface.ts` (the `SurfaceAdapter` contract — the portability boundary between a chat surface
   and everything above it) and `slack-adapter.ts` (the Socket Mode reference implementation).
 - GitHub App identity: `github-app.ts` (App JWT → cached installation token) and `github-session-hooks.ts`
@@ -27,9 +27,8 @@ Extracted from the `@bevyl/agent-kit` packages vendored in [bunion](https://gith
   parsing, a pid-based single-flight lock, clone-or-reset checkout refresh.
 - `codex-config.ts` — one writer for the keyless exe-llm gateway block in `~/.codex/config.toml`.
 - `scrub-env.ts` — the default `scrubEnv`: strip secret-looking vars from what a codex child inherits.
-- `types.ts` — the event/tool/config contract all of the above share.
 
-Source-only TypeScript, no dependencies, Bun ≥ 1.3.
+Source-only TypeScript on `@openai/codex-sdk` and `@modelcontextprotocol/sdk`, Bun ≥ 1.3.
 
 ## Gateway rotation
 

@@ -1,5 +1,7 @@
 import { z } from 'zod'
-import type { DynamicTool } from './types'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+
+import { text } from './mcp'
 
 // The `notion_api` host tool: one Notion REST call per invocation, executed by the brain with its
 // own integration token (NOTION_API_KEY lives ONLY on the brain). Same thin-transport posture as
@@ -38,28 +40,24 @@ const DESCRIPTION =
   'Find things: POST /v1/search with { query }. Read a page: GET /v1/pages/{id} for properties, GET /v1/blocks/{id}/children for content. ' +
   'Only pages shared with the integration are visible. Responses truncated when huge.'
 
-export function notionApiTool(fetchFn: typeof fetch = fetch): DynamicTool<z.infer<typeof Input>, string> {
-  return {
-    name: 'notion_api',
-    description: DESCRIPTION,
-    input: Input,
-    async run({ method, path, body }) {
-      const v = validateNotionPath(path)
-      if ('error' in v) throw new Error(v.error)
-      const token = process.env.NOTION_API_KEY
-      if (!token) throw new Error('not_configured: NOTION_API_KEY is unset on this brain — if this call is essential, record it as a blocker for the operator; do not retry.')
-      const res = await fetchFn(`https://api.notion.com${v.path}`, {
-        method: (method || 'GET').toUpperCase(),
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Notion-Version': NOTION_VERSION,
-          ...(body ? { 'Content-Type': 'application/json' } : {}),
-        },
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      })
-      const text = await res.text()
-      if (!res.ok) throw new Error(`notion ${res.status}: ${text.slice(0, 2000)}`)
-      return text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n…[truncated — narrow the request]` : text
-    },
+export function notionApiTool(fetchFn: typeof fetch = fetch): (server: McpServer) => void {
+  const run = async ({ method, path, body }: z.infer<typeof Input>): Promise<string> => {
+    const v = validateNotionPath(path)
+    if ('error' in v) throw new Error(v.error)
+    const token = process.env.NOTION_API_KEY
+    if (!token) throw new Error('not_configured: NOTION_API_KEY is unset on this brain — if this call is essential, record it as a blocker for the operator; do not retry.')
+    const res = await fetchFn(`https://api.notion.com${v.path}`, {
+      method: (method || 'GET').toUpperCase(),
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Notion-Version': NOTION_VERSION,
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    })
+    const text = await res.text()
+    if (!res.ok) throw new Error(`notion ${res.status}: ${text.slice(0, 2000)}`)
+    return text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n…[truncated — narrow the request]` : text
   }
+  return (server) => server.registerTool('notion_api', { description: DESCRIPTION, inputSchema: Input.shape }, async (args) => text(await run(args)))
 }
