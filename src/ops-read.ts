@@ -1,21 +1,15 @@
 import { z } from 'zod'
-import type { DynamicTool } from './types'
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 
-// The `ops_read` host tool: READ-ONLY observability over Trigger.dev, Vercel, Datadog, and Sentry. The host's security
-// posture deliberately keeps high-privilege keys off worker VMs — so, exactly like linear_graphql, the
-// BRAIN holds the tokens and executes the call on the agent's behalf. Capability, not credential: the agent names an
-// allowlisted read endpoint; the brain attaches auth, runs it, and returns the body. Nothing here can write: every
-// (method, path) must match the per-service allowlist below, and the only non-GET entry is Datadog's log SEARCH
-// endpoint (read-semantic, but POST-shaped). This exists because pit triage kept dead-ending tickets on
-// "can't inspect prod" (failed Trigger runs, skipped Vercel preview builds, Datadog monitors).
+import { text } from './mcp'
 
-const MAX_OUTPUT = 100_000 // chars of response body returned to the agent — plenty for run/deploy JSON, bounded for logs
+const MAX_OUTPUT = 100_000
 
 interface OpsService {
   base(): string
-  auth(): Record<string, string> | null // null = the brain has no token for this service
-  envHint: string // what the operator must set, for the not-configured message
-  allow: [method: string, prefix: string][] // (method, normalized-pathname prefix) — everything else is refused
+  auth(): Record<string, string> | null
+  envHint: string
+  allow: [method: string, prefix: string][]
 }
 
 const SERVICES: Record<string, OpsService> = {
@@ -24,57 +18,51 @@ const SERVICES: Record<string, OpsService> = {
     auth: () => (process.env.TRIGGER_ACCESS_TOKEN ? { authorization: `Bearer ${process.env.TRIGGER_ACCESS_TOKEN}` } : null),
     envHint: 'TRIGGER_ACCESS_TOKEN',
     allow: [
-      ['GET', '/api/v1/runs'], // list runs (filter by env/status/task via query params)
-      ['GET', '/api/v3/runs'], // retrieve one run: /api/v3/runs/:runId (status, attempts, error, output)
-      ['GET', '/api/v1/projects'], // project-scoped listing: /api/v1/projects/:projectRef/runs
-      ['GET', '/api/v1/deployments'], // retrieve a deployment: /api/v1/deployments/:deploymentId
+      ['GET', '/api/v1/runs'],
+      ['GET', '/api/v3/runs'],
+      ['GET', '/api/v1/projects'],
+      ['GET', '/api/v1/deployments'],
     ],
   },
   vercel: {
     base: () => 'https://api.vercel.com',
     auth: () => (process.env.VERCEL_ACCESS_TOKEN ? { authorization: `Bearer ${process.env.VERCEL_ACCESS_TOKEN}` } : null),
     envHint: 'VERCEL_ACCESS_TOKEN',
-    // One prefix per API version rather than a version-agnostic regex: Vercel moves endpoints across versions
-    // (list=v6, get=v13, events=v3), and an explicit row per known-good path keeps the allowlist auditable.
+
     allow: [
-      ['GET', '/v6/deployments'], // list deployments (?projectId=&state=&target=)
-      ['GET', '/v13/deployments'], // get one deployment: /v13/deployments/:idOrUrl
-      ['GET', '/v3/deployments'], // build events / logs: /v3/deployments/:idOrUrl/events
+      ['GET', '/v6/deployments'],
+      ['GET', '/v13/deployments'],
+      ['GET', '/v3/deployments'],
     ],
   },
   datadog: {
     base: () => `https://api.${process.env.DD_SITE || 'datadoghq.com'}`,
     auth: () => {
-      // DATADOG_* first: that's the spelling in the brain's secrets.env (and the operator's ~/.bevyl/.env); the
-      // DD_* forms are accepted as the other spelling common in the wild.
+
       const api = process.env.DATADOG_API_KEY || process.env.DD_API_KEY
       const app = process.env.DATADOG_APPLICATION_KEY || process.env.DD_APPLICATION_KEY || process.env.DD_APP_KEY
       return api && app ? { 'dd-api-key': api, 'dd-application-key': app } : null
     },
     envHint: 'DATADOG_API_KEY + DATADOG_APPLICATION_KEY',
     allow: [
-      ['GET', '/api/v1/monitor'], // list monitors + /api/v1/monitor/:id
-      ['GET', '/api/v1/dashboard'], // list dashboards + /api/v1/dashboard/:id
-      ['POST', '/api/v2/logs/events/search'], // the ONLY non-GET: log search is a read that Datadog shapes as a POST
+      ['GET', '/api/v1/monitor'],
+      ['GET', '/api/v1/dashboard'],
+      ['POST', '/api/v2/logs/events/search'],
     ],
   },
   slack: {
-    // Read-only Slack: tickets arrive from Slack bots and routinely embed thread permalinks as their evidence;
-    // without this the agent dead-ends on "can't read the linked thread". The token is the tag-daemon Slack bot's
-    // (read scopes on the channels it is in) — reads only: fetch a thread, a channel slice, or a user's name.
+
     base: () => 'https://slack.com',
     auth: () => (process.env.SLACK_BOT_TOKEN ? { authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` } : null),
     envHint: 'SLACK_BOT_TOKEN',
     allow: [
-      ['GET', '/api/conversations.replies'], // a thread: ?channel=C…&ts=1234567890.123456 (permalink pNNN → dot before last 6 digits)
-      ['GET', '/api/conversations.history'], // a channel slice: ?channel=C…&oldest=…&limit=…
-      ['GET', '/api/users.info'], // resolve a message's user id to a display name: ?user=U…
+      ['GET', '/api/conversations.replies'],
+      ['GET', '/api/conversations.history'],
+      ['GET', '/api/users.info'],
     ],
   },
   sentry: {
-    // Sentry's REST API lives under /api/0/. A read-scoped personal token (SENTRY_PERSONAL_API_KEY) — or the CI/release
-    // SENTRY_AUTH_TOKEN as the other common spelling — goes in as a Bearer. GET-only on the two top-level read roots
-    // covers alert rules, issues, and project/org config: the "why didn't Sentry page for this crash?" triage.
+
     base: () => 'https://sentry.io',
     auth: () => {
       const t = process.env.SENTRY_PERSONAL_API_KEY || process.env.SENTRY_AUTH_TOKEN
@@ -82,20 +70,16 @@ const SERVICES: Record<string, OpsService> = {
     },
     envHint: 'SENTRY_PERSONAL_API_KEY',
     allow: [
-      ['GET', '/api/0/projects'], // project config + subpaths: /api/0/projects/:org/:project/(rules|issues|events|keys)
-      ['GET', '/api/0/organizations'], // org-level: /api/0/organizations/:org/(projects|issues|integrations)
+      ['GET', '/api/0/projects'],
+      ['GET', '/api/0/organizations'],
     ],
   },
 }
 
-// Resolve (service, method, path) to the exact URL the brain will hit — or a refusal. Pure apart from env reads
-// (VERCEL_TEAM_ID, DD_SITE), so the allowlist + URL hygiene are unit-testable without any live API. Exported for tests.
 export function resolveOpsRequest(service: string, method: string, path: string): { url: string } | { error: string } {
   const svc = SERVICES[service]
   if (!svc) return { error: `unknown_service: ${service} — one of: ${Object.keys(SERVICES).join(', ')}` }
-  // The brain attaches real credentials to this request, so the path must not be able to steer it off-host:
-  // '//evil.com/x' is protocol-relative, and WHATWG URL folds '\' to '/' ('/\evil.com' → '//evil.com'). Require a
-  // plain absolute path AND pin the resolved origin to the service base — belt and braces.
+
   if (!path.startsWith('/') || /^\/[/\\]/.test(path)) return { error: 'invalid_path: must be an absolute path like /api/v1/runs' }
   let url: URL
   try {
@@ -104,22 +88,18 @@ export function resolveOpsRequest(service: string, method: string, path: string)
     return { error: `invalid_path: ${path}` }
   }
   if (url.origin !== new URL(svc.base()).origin) return { error: 'invalid_path: must stay on the service API host' }
-  // Match on the NORMALIZED pathname (URL parsing resolves ../ segments and strips the query), so dot-segment or
-  // query tricks can't smuggle a non-allowlisted endpoint past a prefix check on the raw string.
+
   const m = method.toUpperCase()
   const ok = svc.allow.some(([am, prefix]) => am === m && (url.pathname === prefix || url.pathname.startsWith(prefix + '/')))
   if (!ok) {
     const allowed = svc.allow.map(([am, prefix]) => `${am} ${prefix}`).join(', ')
     return { error: `refused: ${m} ${url.pathname} is not on the ${service} READ allowlist. This tool is read-only; allowed: ${allowed} (each also matches subpaths).` }
   }
-  // Vercel scopes everything by team: append the brain's teamId so the agent doesn't have to know it (an explicit
-  // teamId in the path wins, for the odd cross-team read an operator might steer).
+
   if (service === 'vercel' && process.env.VERCEL_TEAM_ID && !url.searchParams.has('teamId')) url.searchParams.set('teamId', process.env.VERCEL_TEAM_ID)
   return { url: url.toString() }
 }
 
-// Built per session, not module-load, so the project refs/ids reflect the brain's CURRENT env — the agent can't read
-// them any other way (they live only on the brain).
 function describe(): string {
   const refs = [
     process.env.TRIGGER_FAST_PROJECT_REF ? `fast=${process.env.TRIGGER_FAST_PROJECT_REF}` : null,
@@ -144,26 +124,21 @@ const Input = z.object({
   body: z.record(z.string(), z.unknown()).optional().describe('(POST only) JSON request body, e.g. { filter: { query, from, to } }.'),
 })
 
-export function opsReadTool(): DynamicTool<z.infer<typeof Input>, string> {
-  return {
-    name: 'ops_read',
-    description: describe(),
-    input: Input,
-    async run({ service, path, method, body }) {
-      const svc = SERVICES[service]!
-      const headers = svc.auth()
-      // Missing token = a brain-config gap, not an agent error: say so plainly so the agent reports it as a blocker
-      // instead of retrying or inventing credentials.
-      if (!headers) throw new Error(`not_configured: ${service} is not configured on this brain (${svc.envHint} unset) — if this read is essential, record it as a blocker for the operator; do not retry.`)
-      const req = resolveOpsRequest(service, method, path.trim())
-      if ('error' in req) throw new Error(req.error)
-      const payload = method === 'POST' && body ? JSON.stringify(body) : undefined
-      // 30s network timeout, same as linear.ts — a hung upstream must never wedge the agent's turn.
-      const res = await fetch(req.url, { method, headers: payload ? { ...headers, 'content-type': 'application/json' } : headers, ...(payload ? { body: payload } : {}), signal: AbortSignal.timeout(30_000) })
-      const text = await res.text()
-      const out = text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n…[truncated ${text.length - MAX_OUTPUT} of ${text.length} chars — narrow the query]` : text
-      if (!res.ok) throw new Error(`HTTP ${res.status}\n${out}`)
-      return `HTTP ${res.status}\n${out}`
-    },
+export function opsReadTool(): (server: McpServer) => void {
+  const run = async ({ service, path, method, body }: z.infer<typeof Input>): Promise<string> => {
+    const svc = SERVICES[service]!
+    const headers = svc.auth()
+
+    if (!headers) throw new Error(`not_configured: ${service} is not configured on this brain (${svc.envHint} unset) — if this read is essential, record it as a blocker for the operator; do not retry.`)
+    const req = resolveOpsRequest(service, method, path.trim())
+    if ('error' in req) throw new Error(req.error)
+    const payload = method === 'POST' && body ? JSON.stringify(body) : undefined
+
+    const res = await fetch(req.url, { method, headers: payload ? { ...headers, 'content-type': 'application/json' } : headers, ...(payload ? { body: payload } : {}), signal: AbortSignal.timeout(30_000) })
+    const text = await res.text()
+    const out = text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n…[truncated ${text.length - MAX_OUTPUT} of ${text.length} chars — narrow the query]` : text
+    if (!res.ok) throw new Error(`HTTP ${res.status}\n${out}`)
+    return `HTTP ${res.status}\n${out}`
   }
+  return (server) => server.registerTool('ops_read', { description: describe(), inputSchema: Input.shape }, async (args) => text(await run(args)))
 }
