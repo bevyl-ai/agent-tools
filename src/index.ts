@@ -5,7 +5,7 @@ export { isQuotaWall, isRateLimited, maybeRotateGateway, sshGatewayFs, type Gate
 export { execAsync, remoteHome, scpInto, shq, sshExec } from './ssh'
 export { scrubSecrets, SECRET_ENV } from './scrub-env'
 export { writeCodexGatewayConfig, type CodexGatewayOptions } from './codex-config'
-export { codexThread, runTurn, type ThreadConfig, type TurnOptions } from './session'
+export { codexThread, type ThreadConfig } from './session'
 export { serveTools, text, type Tools } from './mcp'
 export { opsReadTool, resolveOpsRequest } from './ops-read'
 export { dbReadTool, validateReadQuery } from './db-read'

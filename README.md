@@ -6,7 +6,7 @@ Extracted from the `@bevyl/agent-kit` packages vendored in [bunion](https://gith
 
 ## What's in it
 
-- `session.ts` — `codexThread({ tools?, model, effort, workingDirectory, … })` starts an SDK thread with the defaults every agent here wants (auto-approve, read-only sandbox, no network, secrets scrubbed from the child env); `runTurn(thread, input, { outputSchema?, turnMs, stallMs, onEvent })` is one turn with turn and stall aborts, returning the final text and usage.
+- `session.ts` — `codexThread({ tools?, model, effort, workingDirectory, … })` starts an SDK thread with the defaults every agent here wants (auto-approve, read-only sandbox, no network, secrets scrubbed from the child env). Turns are the SDK's `thread.run(input, { outputSchema, signal })`.
 - `mcp.ts` — the in-process MCP host. `tools` is `(server: McpServer) => void`: register with the MCP SDK's `registerTool` and zod shapes, closures are the context, and the thread reaches them over streamable HTTP on loopback. `text()` wraps a string result.
 - `rotate.ts` — codex gateway rotation for shared ChatGPT-account pools: when a turn dies on a usage
   limit, advance `~/.codex/config.toml` to the next gateway in `CODEX_GATEWAY_POOL`. See below.
