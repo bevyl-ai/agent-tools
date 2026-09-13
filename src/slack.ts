@@ -10,12 +10,24 @@ const Input = z.object({
   args: z.record(z.string(), z.unknown()).optional().describe("The method's documented arguments."),
 })
 
+// Form-encoded, not JSON: Slack only parses a JSON body on its write methods (chat.*, views.*),
+// while read methods like conversations.replies ignore it and answer "missing required field".
+// Every method accepts a form body; structured values (blocks, attachments) go as JSON strings.
+function formBody(args: Record<string, unknown>): URLSearchParams {
+  const body = new URLSearchParams()
+  for (const [key, value] of Object.entries(args)) {
+    if (value === undefined || value === null) continue
+    body.set(key, typeof value === 'string' ? value : JSON.stringify(value))
+  }
+  return body
+}
+
 export function slackApiTool(name: string, token: string, description: string, fetchFn: typeof fetch = fetch): (server: McpServer) => void {
   const run = async ({ method, args }: z.infer<typeof Input>): Promise<string> => {
     const res = await fetchFn(`https://slack.com/api/${method}`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(args ?? {}),
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded; charset=utf-8' },
+      body: formBody(args ?? {}),
     })
     const out = await res.text()
     if (!res.ok) throw new Error(`slack ${res.status}: ${out.slice(0, 2000)}`)
