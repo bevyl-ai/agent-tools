@@ -1,9 +1,24 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { McpServer, type ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { ShapeOutput, ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 
 export type Tools = (server: McpServer) => void
 
 export const text = (s: string): { content: { type: 'text'; text: string }[] } => ({ content: [{ type: 'text', text: s }] })
+
+export function tool<S extends ZodRawShapeCompat>(
+  server: McpServer,
+  name: string,
+  description: string,
+  shape: S,
+  run: (args: ShapeOutput<S>) => Promise<unknown>,
+): void {
+  const callback: ToolCallback<S> = (async (args: ShapeOutput<S>) => {
+    const result = await run(args)
+    return text(typeof result === 'string' ? result : JSON.stringify(result))
+  }) as unknown as ToolCallback<S>
+  server.registerTool(name, { description, inputSchema: shape }, callback)
+}
 
 const routes = new Map<string, WebStandardStreamableHTTPServerTransport>()
 let host: ReturnType<typeof Bun.serve> | null = null
